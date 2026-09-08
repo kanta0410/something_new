@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>転生クオンツ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Shippori+Mincho+B1:wght@500;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>/*__CSS__*/</style>
+</head>
+<body>
+<div id="err" class="error-banner" hidden></div>
+
+<header class="hdr">
+  <div class="hdr-logo">
+    <h1 class="logo">転生<b>クオンツ</b></h1>
+    <span class="logo-sub">Isekai Quant</span>
+  </div>
+  <dl class="hdr-stats">
+    <div><dt class="eyebrow">Life</dt><dd id="h-life" class="num">第1生</dd></div>
+    <div><dt class="eyebrow">Age / Year</dt><dd id="h-age" class="num">22歳 / 2026</dd></div>
+    <div><dt class="eyebrow">Net worth</dt><dd id="h-nw" class="num gold">300万</dd></div>
+    <div><dt class="eyebrow">Score</dt><dd id="h-score" class="num">0</dd></div>
+    <div><dt class="eyebrow">Market</dt><dd><span id="h-regime" class="chip r-平穏">平穏</span></dd></div>
+    <div><dt class="eyebrow">Seed</dt><dd id="h-seed" class="num hdr-seed muted">—</dd></div>
+  </dl>
+</header>
+
+<main class="grid">
+  <section class="col" aria-label="今年の采配">
+    <div class="panel">
+      <h2 class="panel-title">今年の采配 <span class="eyebrow">Decisions</span></h2>
+      <div class="sub">
+        <h3>時間 <span class="num muted" id="time-sum">100</span></h3>
+        <div id="time-rows"></div>
+      </div>
+      <div class="sub">
+        <h3>お金</h3>
+        <div class="slider-row"><span>貯蓄率</span><input type="range" id="in-save" min="0" max="80" step="5"><span class="val num" id="v-save">50%</span></div>
+        <p class="hint">手取りの余剰のうち投資に回す割合。残りは遊興費として「楽しさ」に変わる。</p>
+        <div class="slider-row"><span>株式比率</span><input type="range" id="in-stock" min="0" max="100" step="5"><span class="val num" id="v-stock">60%</span></div>
+        <p class="hint" id="hint-stock">流動資産（現金+株）のうち株式に置く目標比率。毎年リバランスされる。</p>
+      </div>
+      <div class="sub">
+        <h3>スキル <span class="eyebrow">持ち越し</span></h3>
+        <div id="skills"></div>
+      </div>
+      <div class="sub">
+        <h3>メーター</h3>
+        <div id="meters"></div>
+      </div>
+      <div class="sub fire">
+        <label id="fire-label"><input type="checkbox" id="in-fire"> <span>FIRE（会社を辞める）</span></label>
+        <p class="hint" id="fire-hint"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="col" aria-label="資産・市場・街">
+    <div class="panel">
+      <h2 class="panel-title">資産推移 <span class="num" id="nw-now"></span><span class="eyebrow">Net worth</span></h2>
+      <canvas id="cv-nw" class="chart"></canvas>
+      <div class="chart-meta" id="nw-meta"></div>
+    </div>
+    <div class="panel">
+      <h2 class="panel-title">市場 <span id="mk-regime" class="chip r-平穏">平穏</span><span class="eyebrow">Market</span></h2>
+      <canvas id="cv-mk" class="chart"></canvas>
+      <div class="chart-meta" id="mk-meta"></div>
+    </div>
+    <div class="panel" id="panel-city">
+      <h2 class="panel-title">街と買い付け <span class="eyebrow">City</span></h2>
+      <div class="city-wrap">
+        <canvas id="cv-city" aria-label="街の地図。クリックで地区を選ぶ"></canvas>
+        <div class="district" id="district"><p class="empty">地区をクリックすると詳細が出る。未偵察の地区は「?」。偵察先は最大 3 つ。</p></div>
+      </div>
+      <div class="two">
+        <div><h3>所有物件 <span class="num muted" id="props-count">0</span></h3><ul class="props" id="props"></ul></div>
+        <div><h3>今年の買い付け <span class="num muted" id="pending-count">0 / 3</span></h3><ul class="pending" id="pending"></ul></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2 class="panel-title">クオンツ <span class="eyebrow" id="q-lv">Lv0</span></h2>
+      <div class="tabs" role="tablist" id="q-tabs"></div>
+      <div class="tabpane" id="q-pane"></div>
+    </div>
+  </section>
+
+  <section class="col" aria-label="賢人会議とログ">
+    <div class="panel">
+      <h2 class="panel-title">賢人会議 <span class="eyebrow">Council</span></h2>
+      <div id="advisors"></div>
+    </div>
+    <div class="panel">
+      <h2 class="panel-title">ログ <span class="eyebrow">Log</span></h2>
+      <ul class="log" id="log"></ul>
+    </div>
+  </section>
+</main>
+
+<nav class="bar-actions" aria-label="操作">
+  <button class="btn primary" id="btn-end">今年を終える ▶</button>
+  <button class="btn" id="btn-city">街と買い付け</button>
+  <button class="btn" id="btn-books">本棚 <span class="num" id="books-count"></span></button>
+  <button class="btn" id="btn-hall">殿堂</button>
+  <button class="btn" id="btn-help">遊び方</button>
+  <span class="spacer"></span>
+  <span id="reborn-wrap"><button class="btn danger" id="btn-reborn">転生する</button></span>
+</nav>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div id="modal-root"></div>
+<div id="alamo-root"></div>
+
+<script>/*__JS__*/</script>
+</body>
+</html>

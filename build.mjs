@@ -18,3 +18,16 @@ const out = tpl
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/index.html', out);
 console.log('built dist/index.html', (out.length / 1024).toFixed(1), 'KB');
+
+// Artifact 用: ホストが <!doctype html><html><head>…</head><body> を付けるので、ラッパーを剥がした断片も出力する。
+const fragment = out
+  .replace(/<!doctype[^>]*>/i, '')
+  .replace(/<html[^>]*>/i, '')
+  .replace(/<\/html>/i, '')
+  .replace(/<head>|<\/head>/gi, '')
+  .replace(/<body[^>]*>|<\/body>/gi, '')
+  .replace(/<meta[^>]*charset[^>]*>/i, '')
+  .replace(/<meta[^>]*viewport[^>]*>/i, '')
+  .trim();
+writeFileSync('dist/artifact.html', fragment);
+console.log('built dist/artifact.html', (fragment.length / 1024).toFixed(1), 'KB');

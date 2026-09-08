@@ -134,8 +134,9 @@ export function stats(history) {
 export function returnsFromHistory(history) {
   if (!Array.isArray(history)) return [];
   const out = [];
-  for (const r of history) {
-    const v = r?.marketReturn;
+  // history[0] は出生時のレコード（marketReturn 0 のダミー）なので除く
+  for (let i = 1; i < history.length; i++) {
+    const v = history[i]?.marketReturn;
     if (Number.isFinite(v)) out.push(v);
   }
   return out;

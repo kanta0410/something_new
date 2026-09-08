@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>demo-charts — 転生クオンツ Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html, body { background: #0E1A2B; color: #F1E9D2; margin: 0; }
+  body { font-family: "DotGothic16", sans-serif; padding: 16px; }
+  h1 { font-size: 14px; font-weight: normal; margin: 0 0 12px; color: #D9A441; letter-spacing: .1em; }
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+  .panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .panel h2 { font-size: 11px; font-weight: normal; margin: 0; color: #8F8CB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel h2 code { font-family: "IBM Plex Mono", ui-monospace, monospace; color: #F1E9D2; }
+  canvas { display: block; width: 100%; border: 1px solid #2A4266; background: #15263D; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row .k { font-size: 11px; color: #8F8CB8; width: 44px; }
+  .row canvas { width: 120px; height: 32px; border: 0; background: transparent; }
+  .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>転生クオンツ — Canvas チャート デモ（合成データ）</h1>
+<div class="grid">
+  <div class="panel" style="grid-column: span 8">
+    <h2><code>drawNetWorth</code> 40 年 / バブル → 暴落 / 不動産 + 負債（ホバーで十字線）</h2>
+    <canvas id="nw" style="height:260px"></canvas>
+  </div>
+  <div class="panel" style="grid-column: span 4">
+    <h2><code>drawRadar</code> 富 / 楽 / 学 / 縁</h2>
+    <canvas id="radar" style="height:260px"></canvas>
+  </div>
+
+  <div class="panel" style="grid-column: span 5">
+    <h2><code>drawMarket</code> quantLevel=4（本源価値 + wc ストリップ + 暴落帯）</h2>
+    <canvas id="mkt4" style="height:220px"></canvas>
+  </div>
+  <div class="panel" style="grid-column: span 4">
+    <h2><code>drawMarket</code> quantLevel=0（指数のみ）</h2>
+    <canvas id="mkt0" style="height:160px"></canvas>
+  </div>
+  <div class="panel" style="grid-column: span 3">
+    <h2><code>drawMarket</code> 1 点 → プレースホルダ</h2>
+    <canvas id="mkt1" style="height:160px"></canvas>
+  </div>
+
+  <div class="panel" style="grid-column: span 6">
+    <h2><code>drawFan</code> 61→100 歳 / asinh スケール / 破産確率</h2>
+    <canvas id="fan" style="height:240px"></canvas>
+  </div>
+  <div class="panel" style="grid-column: span 3">
+    <h2><code>drawFan</code> 小（線形）</h2>
+    <canvas id="fan2" style="height:160px"></canvas>
+  </div>
+  <div class="panel" style="grid-column: span 3">
+    <h2><code>drawNetWorth</code> 300×160</h2>
+    <canvas id="nw2" style="height:160px"></canvas>
+    <div class="row"><span class="k">純資産</span><canvas id="sp1"></canvas><span class="num" id="sp1v"></span></div>
+    <div class="row"><span class="k">元気</span><canvas id="sp2"></canvas><span class="num" id="sp2v"></span></div>
+  </div>
+
+  <div class="panel" style="grid-column: span 5">
+    <h2><code>drawCity</code> 選択 / ホバー / 所有 / 売出し / 偵察先 / quantLevel=2</h2>
+    <canvas id="city" style="height:380px"></canvas>
+  </div>
+  <div class="panel" style="grid-column: span 3">
+    <h2><code>drawCity</code> 300×280 / quantLevel=0</h2>
+    <canvas id="city2" style="height:280px"></canvas>
+    <div class="num" id="hit" style="color:#8F8CB8;font-size:11px">districtAt: —</div>
+  </div>
+  <div class="panel" style="grid-column: span 4">
+    <h2><code>drawNetWorth</code> 空 / <code>drawFan</code> 空</h2>
+    <canvas id="nw0" style="height:120px"></canvas>
+    <canvas id="fan0" style="height:120px"></canvas>
+  </div>
+</div>
+
+<script type="module">
+import { drawNetWorth, drawMarket, drawFan, drawSparkline, drawRadar } from '../src/ui/charts.js';
+import { drawCity, districtAt } from '../src/ui/cityView.js';
+
+// ---- 決定的な乱数（スクリーンショットの再現性のため） ----
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rnd = mulberry32(20260908);
+const normal = () => { const u = Math.max(1e-9, rnd()); const v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+
+// ---- 市場（40 年）: 12–18 年目バブル、19 年目暴落 −42%、33 年目 −28% ----
+const N = 40;
+const index = [100];
+const fundamental = [100];
+const wc = [0.3];
+const xdev = [0];
+for (let i = 1; i < N; i++) {
+  fundamental.push(fundamental[i - 1] * Math.exp(0.05 + 0.02 * normal()));
+  let g;
+  if (i >= 12 && i <= 18) g = 0.22 + 0.04 * normal();
+  else if (i === 19) g = Math.log(0.58);
+  else if (i >= 20 && i <= 22) g = 0.02 + 0.05 * normal();
+  else if (i === 33) g = Math.log(0.72);
+  else g = 0.06 + 0.12 * normal();
+  index.push(index[i - 1] * Math.exp(g));
+  const x = Math.log(index[i] / fundamental[i]);
+  xdev.push(x);
+  wc.push(Math.max(0.05, Math.min(0.95, 0.3 + 0.9 * Math.max(0, x) + 0.05 * normal())));
+}
+const market = { year: N - 1, series: { index, fundamental, wc, x: xdev } };
+
+// ---- 人生 40 年（22→61 歳）----
+const history = [];
+{
+  let cash = 150, stocks = 0, value = 0, loan = 0, loanPay = 0, energy = 70, network = 20, learning = 0, funTotal = 0;
+  for (let i = 0; i < N; i++) {
+    const age = 22 + i, year = 2026 + i;
+    const mr = i ? index[i] / index[i - 1] - 1 : 0;
+    const salary = 400 + 22 * i;
+    const save = salary * 0.28;
+    stocks = stocks * (1 + mr) + save * 0.75;
+    cash += save * 0.25 + 30 * normal();
+    if (i === 8) { value = 4200; loan = 3700; loanPay = 3700 / 25; cash -= 500 + 290; }
+    if (i === 15) { value += 7800; loan += 6800; loanPay += 6800 / 25; cash -= 1000 + 550; }
+    if (value > 0) {
+      value *= Math.exp(0.015 + 0.3 * (mr - 0.05) + 0.05 * normal());
+      loan = Math.max(0, loan - loanPay);
+      cash += value * 0.02;
+    }
+    cash = Math.max(cash, 40);
+    energy = Math.max(20, Math.min(100, energy + 4 * normal() - 0.3));
+    network = Math.min(100, network + 1.5 + 2 * rnd());
+    learning += 30 + 20 * rnd();
+    funTotal += 40 + 20 * rnd();
+    const reEquity = value - loan;
+    const netWorth = cash + stocks + reEquity;
+    history.push({ year, age, netWorth, cash, stocks, reEquity, debt: loan, income: salary, marketReturn: mr, index: index[i], fun: 50 + 20 * rnd(), energy, network, learning, score: Math.round(netWorth / 100) });
+  }
+}
+
+// ---- モンテカルロ（61→100 歳）----
+function fan(startNw, years, mu, sigma, drift, curAge, yearBase) {
+  const out = { years: [], ages: [], p5: [], p25: [], p50: [], p75: [], p95: [], ruinProb: 0.18, n: 400 };
+  for (let k = 0; k < years; k++) {
+    const sd = sigma * Math.sqrt(k);
+    const med = startNw * Math.exp(mu * k);
+    const q = (z) => med * Math.exp(z * sd) - drift * k * k;
+    out.years.push(yearBase + k);
+    out.ages.push(curAge + k);
+    out.p5.push(q(-1.645));
+    out.p25.push(q(-0.674));
+    out.p50.push(q(0));
+    out.p75.push(q(0.674));
+    out.p95.push(q(1.645));
+  }
+  return out;
+}
+const last = history[history.length - 1];
+const mc = fan(last.netWorth, 40, 0.05, 0.19, 12, last.age, last.year);
+const mc2 = { ...fan(4200, 30, 0.04, 0.10, 0, 35, 2039), ruinProb: 0.03 };
+
+const score = { wealth: 632, fun: 480, learning: 720, network: 310, brag: 40, total: 2182 };
+
+// ---- 街（36 地区）----
+const KINDS = ['駅前', '住宅', '郊外', '湾岸', '山手', '工業'];
+const PRE = ['東雲', '桜', '若葉', '港', '清水', '鉄', '朝日', '緑', '梅', '白鳥', '夕凪', '北条', '千代', '藤', '月見', '神楽坂'];
+const SUF = { 駅前: '駅前', 住宅: '町', 郊外: '野', 湾岸: '浜', 山手: 'が丘', 工業: '工区' };
+const districts = [];
+for (let i = 0; i < 36; i++) {
+  const kind = KINDS[Math.floor(rnd() * 6)];
+  const value = Math.round(1500 + 7500 * rnd());
+  const yieldRate = Math.max(0.035, Math.min(0.13, 0.13 - ((value - 1500) / 7500) * 0.09 + 0.015 * normal()));
+  const visits = rnd() < 0.42 ? 0 : 1 + Math.floor(rnd() * 4);
+  const estError = 0.3 * Math.exp(-0.35 * visits);
+  districts.push({
+    id: i, x: i % 6, y: Math.floor(i / 6),
+    name: PRE[Math.floor(rnd() * PRE.length)] + SUF[kind], kind, value, yieldRate,
+    visits, estimate: value * Math.exp(estError * normal()), estError, knownSecrets: [], owned: 0,
+  });
+}
+districts[8].visits = 3; districts[8].owned = 1;
+districts[21].visits = 2; districts[21].owned = 2;
+districts[14].visits = 1;
+districts[15].visits = 2;
+districts[0].name = '神楽坂駅前';
+districts[0].visits = 1;
+districts[7].value = 32000; districts[7].estimate = 31000; districts[7].visits = 2;
+const city = { districts, listings: [], year: 12, nextListingId: 1 };
+const cityOpts = {
+  selected: 14, hover: 15,
+  ownedDistrictIds: new Set([8, 21]),
+  listingDistrictIds: new Set([3, 8, 14, 27, 30, 33, 0]),
+  scoutTargets: new Set([5, 19, 28]),
+  blink: true, quantLevel: 2,
+};
+
+// ---- 描画 ----
+const $ = (id) => document.getElementById(id);
+function drawAll() {
+  drawNetWorth($('nw'), history);
+  drawNetWorth($('nw2'), history.slice(0, 18));
+  drawNetWorth($('nw0'), []);
+  drawRadar($('radar'), score);
+  drawMarket($('mkt4'), market, { quantLevel: 4 });
+  drawMarket($('mkt0'), market, { quantLevel: 0 });
+  drawMarket($('mkt1'), { year: 0, series: { index: [100], fundamental: [100], wc: [0.3], x: [0] } }, { quantLevel: 4 });
+  drawFan($('fan'), mc, { currentAge: last.age });
+  drawFan($('fan2'), mc2, { currentAge: 35 });
+  drawFan($('fan0'), null);
+  drawSparkline($('sp1'), history.map((r) => r.netWorth), { color: '#D9A441' });
+  $('sp1v').textContent = Math.round(last.netWorth / 1e4 * 10) / 10 + '億';
+  drawSparkline($('sp2'), history.map((r) => r.energy), { color: '#6FBFA3', baseline: 50 });
+  $('sp2v').textContent = Math.round(last.energy);
+  drawCity($('city'), city, cityOpts);
+  drawCity($('city2'), city, { ...cityOpts, quantLevel: 0, hover: null, blink: false });
+}
+drawAll();
+window.__demoReady = true;
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { drawAll(); window.__fontsReady = true; });
+window.addEventListener('resize', drawAll);
+
+// 街のヒットテスト（ホバー追従）
+const cityCanvas = $('city');
+cityCanvas.addEventListener('pointermove', (e) => {
+  const id = districtAt(cityCanvas, e.clientX, e.clientY, city);
+  if (id !== cityOpts.hover) { cityOpts.hover = id; drawCity(cityCanvas, city, cityOpts); }
+  $('hit').textContent = 'districtAt: ' + (id == null ? '—' : id + ' ' + districts[id].name);
+});
+cityCanvas.addEventListener('pointerleave', () => { cityOpts.hover = null; drawCity(cityCanvas, city, cityOpts); });
+cityCanvas.addEventListener('click', (e) => {
+  cityOpts.selected = districtAt(cityCanvas, e.clientX, e.clientY, city);
+  drawCity(cityCanvas, city, cityOpts);
+});
+// 点滅（?static=1 か reduced-motion で止める）
+const isStatic = new URLSearchParams(location.search).has('static') || matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!isStatic) setInterval(() => { cityOpts.blink = !cityOpts.blink; drawCity(cityCanvas, city, cityOpts); }, 600);
+</script>
+</body>
+</html>

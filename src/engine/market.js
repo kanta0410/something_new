@@ -27,26 +27,37 @@
  */
 export const DEFAULT_PARAMS = Object.freeze({
   // 本源価値プロセス（年率）
-  muF: 0.05,
+  muF: 0.07,
   sigmaF: 0.10,
   // 価格ダイナミクス
-  phi: 0.06,          // ファンダメンタリストの回帰強度
-  phiAsym: 0.0,       // 割高側 (x>0) の回帰強度を (1+phiAsym) 倍（暴落を鋭くする非対称性）
-  stretchK: 2.0,      // |x| > stretchX0 で回帰強度を 1 + stretchK·(|x|−stretchX0) 倍
-  stretchX0: 0.3,     // 回帰強度が増し始める乖離
-  stretchDown: 1.0,   // 割安側 (x<0) のストレッチ係数の割合（0 で割安側は線形 = 底は緩やかに回復）
-  g: 0.85,            // チャーティストの外挿係数
+  phi: 0.05,          // ファンダメンタリストの回帰強度
+  phiAsym: 0.3,       // 割高側 (x>0) の回帰強度を (1+phiAsym) 倍（暴落を鋭くする非対称性）
+  stretchK: 4.0,      // |x| > stretchX0 で回帰強度を 1 + stretchK·(|x|−stretchX0) 倍
+  stretchX0: 0.2,     // 回帰強度が増し始める乖離
+  stretchDown: 0.5,   // 割安側 (x<0) のストレッチ係数の割合（0 で割安側は線形 = 底は緩やかに回復）
+  g: 0.8,            // チャーティストの外挿係数
+  ecCap: 0.025,        // 外挿の飽和幅: E_c = g · ecCap · tanh(Δp / ecCap)（月 4% 超の変化は線形に外挿しない）
   gDown: 0.0,         // 下落トレンドの外挿を (1+gDown) 倍（パニック売り）
   lambda: 1.0,        // 市場の反応係数
-  sigmaN: 0.035,      // 月次ノイズ
-  volLev: 0.0,        // 割高時にノイズを増やす（σ_n · (1 + volLev·max(0,x))）
-  passThrough: 0.6,   // 本源価値の変化が当月価格に反映される割合
-  beta: 250,          // 切替の感応度
+  sigmaN: 0.025,      // 月次ノイズ
+  volLev: 0.3,        // 割高時にノイズを増やす（σ_n · (1 + volLev·max(0,x))）
+  passThrough: 0.9,   // 本源価値の変化が当月価格に反映される割合
+  beta: 500,          // 切替の感応度
   memory: 0.8,        // 成績の記憶（1 に近いほど長期）
   wcMin: 0.05,
-  wcMax: 0.95,
+  wcMax: 0.85,
   divYield: 0.02,     // 乖離ゼロ時の配当利回り（年率）
   xClamp: 2.0,        // 安全弁: |x| をこの範囲に強制（通常は発動しない）
+  // 暴落ジャンプ（反射性: 割高でチャーティストが多いほど崩壊確率が上がる）
+  jumpBase: 0.010,    // 月次の基礎ジャンプ確率
+  jumpX: 0.20,        // 乖離 x による追加確率: jumpX · max(0, x − jumpX0) · (0.5 + wc)
+  jumpX0: 0.15,
+  jumpMin: 0.15,      // ジャンプ幅（対数）の下限
+  jumpMax: 0.32,      // ジャンプ幅（対数）の上限
+  jumpFund: 0.65,      // ジャンプのうち本源価値にも反映される割合（暴落は実体経済の悪化を伴う）
+  panicAdd: 0.09,     // ジャンプ直後に月次ジャンプ確率へ上乗せされる「パニック」
+  panicDecay: 0.7,    // パニックの月次減衰
+  bubbleX: 0.20,      // バブル判定の乖離しきい値
   // 金利（年率換算の係数。月次で 1/12 スケール）
   rate0: 0.015,
   rateMean: 0.02,
@@ -116,6 +127,7 @@ export function createMarket(rng, params) {
     uc: logit(wc0) / P.beta,
     wc: wc0,
     rate: clamp(P.rate0, P.rateMin, P.rateMax),
+    panic: 0,
     index: 100,
     year: 0,
     params: P,
@@ -146,16 +158,30 @@ export function stepMonth(market, rng) {
     ? (1 + P.phiAsym) * (1 + P.stretchK * over)
     : 1 + P.stretchDown * P.stretchK * over;
   const Ef = -P.phi * x * force;
-  const Ec = P.g * dpPrev * (dpPrev < 0 ? 1 + P.gDown : 1);
+  const dpSat = P.ecCap > 0 ? P.ecCap * Math.tanh(dpPrev / P.ecCap) : dpPrev;
+  const Ec = P.g * dpSat * (dpPrev < 0 ? 1 + P.gDown : 1);
 
   // 本源価値
   const df = (P.muF - 0.5 * P.sigmaF * P.sigmaF) / 12 + (P.sigmaF / SQRT12) * rng.normal();
-  const fNext = f + df;
+  let fNext = f + df;
 
   // 価格
   const wc = market.wc, wf = 1 - wc;
   const sigma = P.sigmaN * (1 + P.volLev * Math.max(0, x));
   let pNext = p + df * P.passThrough + P.lambda * (wf * Ef + wc * Ec) + sigma * rng.normal();
+
+  // 暴落ジャンプ: 割高でチャーティスト比率が高いほど起きやすい（反射性の崩壊）
+  const jumpProb = P.jumpBase + P.jumpX * Math.max(0, x - P.jumpX0) * (0.5 + wc) + (market.panic || 0);
+  let jumped = false;
+  if (rng.next() < jumpProb) {
+    const size = P.jumpMin + (P.jumpMax - P.jumpMin) * rng.next();
+    pNext -= size;
+    fNext -= size * P.jumpFund;
+    jumped = true;
+    market.panic = (market.panic || 0) * P.panicDecay + P.panicAdd;
+  } else {
+    market.panic = (market.panic || 0) * P.panicDecay;
+  }
 
   // 安全弁（通常は発動しない）
   const xNext = pNext - fNext;
@@ -182,7 +208,7 @@ export function stepMonth(market, rng) {
   market.f = fNext;
   market.index = 100 * Math.exp(pNext);
 
-  return { logRet: dp, dividend };
+  return { logRet: dp, dividend, jumped };
 }
 
 /**
@@ -226,7 +252,7 @@ export function stepYear(market, rng) {
     monthly,
     vol,
     crash: totalReturn < -0.25,
-    bubble: x > 0.35,
+    bubble: x > P.bubbleX,
     rate,
     mortgageRate: rate + P.mortgageSpread,
     depositRate: rate * P.depositMult,
@@ -262,8 +288,8 @@ export function regimeLabel(market) {
   const last = market.last;
   if (x < -0.25) return '底値';
   if (last && last.crash) return '暴落';
-  if (x > 0.35) return 'バブル';
-  if (market.wc > 0.65 && x > 0.15) return '過熱';
+  if (x > market.params.bubbleX) return 'バブル';
+  if (market.wc > 0.6 && x > 0.10) return '過熱';
   if (last && last.totalReturn < -0.10) return '調整';
   return '平穏';
 }
@@ -285,6 +311,7 @@ export function cloneMarket(market) {
     uc: market.uc,
     wc: market.wc,
     rate: market.rate,
+    panic: market.panic || 0,
     index: market.index,
     year: market.year,
     params: { ...market.params },

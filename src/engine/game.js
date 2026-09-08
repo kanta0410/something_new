@@ -19,6 +19,7 @@ export const CLOSING_COST = 0.07;
 export const MAX_OFFERS = 3;
 export const MAX_BOOKS = 2;
 export const MAX_SCOUT_TARGETS = 3;
+export const PENSION_AGE = 65;
 
 const SKILL_IDS = ['reading', 'comm', 'local', 'quant', 'guts'];
 
@@ -163,14 +164,25 @@ export function endYear(state, rawDecisions) {
   const nwStart = netWorth(state);
   const lastCrash = !!state.flags.lastCrash;
 
-  // 1. キャリア
+  // 1. キャリア（定年時は退職金 = 最終給与 × 2）
+  const salaryBefore = state.work.salary || 0;
   const career = advanceCareer(state, d, rng);
   for (const t of career.events || []) { pushLog(state, 'money', t); report.careerEvents.push(t); }
+  if ((career.kinds || []).includes('retire') && salaryBefore > 0) {
+    const severance = salaryBefore * 2;
+    state.money.cash += severance;
+    pushLog(state, 'money', `退職金 ${fmt(severance)}が振り込まれた。さて、この金をどうする？`);
+    report.severance = severance;
+  }
 
   // 2. 収入と生活費、先取り投資
   const inc = computeIncome(state, d);
+  state.flags.peakSalary = Math.max(state.flags.peakSalary || 0, state.work.salary || 0);
+  // 年金: 65 歳から。基礎 100万 + 厚生分（最高給与の 8%、上限 100万）
+  inc.pension = state.life.age >= PENSION_AGE ? 100 + Math.min(100, 0.08 * (state.flags.peakSalary || 0)) : 0;
+  if (inc.pension > 0 && state.life.age === PENSION_AGE) pushLog(state, 'money', `年金受給開始。年 ${fmt(inc.pension)}。`);
   report.income = inc;
-  const surplus = inc.net + inc.hustle - inc.living;
+  const surplus = inc.net + inc.hustle + inc.pension - inc.living;
   let invest = surplus, spend = 0;
   if (surplus > 0) { invest = surplus * d.savingsRate; spend = surplus - invest; }
   state.money.cash += invest; // 生活費・遊興費は差し引き済み
@@ -299,7 +311,8 @@ export function endYear(state, rawDecisions) {
     if (r) { readingBudget -= 10; report.books.push({ id: bid, ...r }); pushLog(state, 'info', `本を読んだ: ${r.title || bid}。${executed ? '実行を伴い効果2倍。' : ''}${r.quote ? '「' + r.quote + '」' : ''}`); }
   }
 
-  // 12. 破産チェック（自動清算）
+  // 12. 破産チェック（自動清算）。現金がマイナスなら株→物件の順に取り崩し、
+  //     それでも足りなければカードローン（年 15%）。借入が生活費 2 年分を超えたら破産。
   if (state.money.cash < 0) {
     if (state.money.stocks > 0) {
       const sell = Math.min(state.money.stocks, -state.money.cash);
@@ -316,7 +329,10 @@ export function endYear(state, rawDecisions) {
     }
     state.money.debt = state.props.reduce((s, p) => s + p.loan, 0);
     if (state.money.cash < 0) {
-      report.bankrupt = true;
+      state.money.cash *= 1.15;
+      const limit = -2 * (inc.living || 240);
+      if (state.money.cash < limit) report.bankrupt = true;
+      else pushLog(state, 'bad', `カードローンで凌いだ。借入 ${fmt(-state.money.cash)}（年 15%）。限度は ${fmt(-limit)}。`);
     }
   }
 
@@ -336,7 +352,7 @@ export function endYear(state, rawDecisions) {
     if (!death && state.life.age >= MAX_AGE) death = 'natural';
   }
 
-  const hist = record(state, yr, inc.net + inc.hustle);
+  const hist = record(state, yr, inc.net + inc.hustle + inc.pension);
   state.history.push(hist);
   state.policy = { ...d, offers: [], sells: [], books: [], quitJob: false };
   state.rngState = rng.state();

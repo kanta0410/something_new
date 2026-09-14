@@ -6,10 +6,10 @@ import { kelly, stats, monteCarlo, unlockLevel, returnsFromHistory } from '../en
 import { availableBooks } from '../engine/books.js';
 import { SKILLS, skillLevels, nextLevelXp, level } from '../engine/skills.js';
 import { computeScore, lifeSummary } from '../engine/score.js';
-import { netWorth } from '../engine/life.js';
+import { netWorth, computeIncome } from '../engine/life.js';
 import { fitCanvas, drawNetWorth, drawMarket, drawFan, drawSparkline, drawRadar } from './charts.js';
 import { drawCity, districtAt } from './cityView.js';
-import { REAL_ACTIONS, recordRealAction, doneToday, currentStreak, ensureDaily, recentDays, ledgerText, todayKey, questFor, setNote, getNote, recentNotes } from '../engine/real.js';
+import { REAL_ACTIONS, recordRealAction, doneToday, currentStreak, ensureDaily, recentDays, ledgerText, todayKey, questFor, setNote, getNote, recentNotes, dayIndex } from '../engine/real.js';
 import { play, setSoundEnabled } from './sound.js';
 import { previewLifeTitles, awardStreakTitles, ensureTitles } from '../engine/titles.js';
 
@@ -68,7 +68,7 @@ function boot() {
   ensureDaily(meta);
   setSoundEnabled(meta.sound !== false);
   ui.mode = meta.mode === 'full' ? 'full' : 'daily';
-  ui.preset = meta.preset || 'guard';
+  ui.preset = (meta.preset === 'custom' || PRESETS[meta.preset]) ? meta.preset : 'guard';
   if (ui.preset !== 'custom') applyPreset(ui.preset, true);
   buildStaticControls();
   bindGlobal();
@@ -183,10 +183,11 @@ function renderHeader() {
   $('h-seed').textContent = String(state.seed);
   $('q-lv').textContent = `クオンツ Lv${st.levels.quant}`;
   const fire = $('in-fire'), lab = $('fire-label');
-  const can = st.passive > st.living && state.work.employed && !state.flags.fired;
+  const inc = computeIncome(state, decisions);
+  const can = inc.passive > inc.living && state.work.employed && !state.flags.fired;
   fire.disabled = !can; fire.checked = !!decisions.quitJob; lab.classList.toggle('off', !can);
-  $('fire-hint').textContent = state.flags.fired ? `FIRE 済み。不労所得 ${fmt(st.passive)} / 生活費 ${fmt(st.living)}`
-    : `不労所得 ${fmt(st.passive)} / 生活費 ${fmt(st.living)}。不労所得が生活費を超えると辞められる。`;
+  $('fire-hint').textContent = state.flags.fired ? `FIRE 済み。不労所得 ${fmt(inc.passive)} / 生活費 ${fmt(inc.living)}`
+    : `不労所得 ${fmt(inc.passive)} / 生活費 ${fmt(inc.living)}。不労所得が生活費を超えると辞められる。`;
   $('btn-end').disabled = !state.life.alive;
 }
 
@@ -330,7 +331,7 @@ function openOffer(listingId) {
   const s = districtSummary(state.city, l.districtId);
   const existing = decisions.offers.find(o => o.listingId === listingId);
   const lv = skillLevels(state);
-  const lastInc = state.history[state.history.length - 1]?.income || state.work.salary;
+  const lastInc = game.loanIncome(state, decisions);
   const mortgage = state.market.last?.mortgageRate ?? (state.market.rate + 0.012);
   let bid = existing ? existing.bidRatio : 0.85, ltv = existing ? existing.ltv : 0.7;
   const body = el('div', { class: 'offer-grid' });
@@ -549,7 +550,7 @@ function toast(kind, title, text) {
 
 // ───────────────────────── 年送り ─────────────────────────
 function endYear() {
-  if (!state.life.alive || ui.modal) return;
+  if (!state.life.alive || ui.modal || ui.busy) return;
   const nwBefore = netWorth(state);
   if (ui.mode === 'daily' && ui.quick) decisions.offers = quickOffersFor(ui.quickRatio);
   let report;
@@ -575,7 +576,7 @@ function endYear() {
     if (ui.mode === 'daily') { const r = $('d-result'); if (r) r.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' }); }
     if (report.death) setTimeout(openReborn, 400);
   };
-  if (alamo) showAlamo(after); else after();
+  if (alamo) { ui.busy = true; showAlamo(() => { ui.busy = false; after(); }); } else after();
 }
 
 function showAlamo(done) {
@@ -655,7 +656,8 @@ function openReborn() {
     el('p', { class: 'hint', style: 'margin-top:8px' }, 'スキル XP は全部持ち越す。次の人生は 22 歳、現金 300 万。同じ世界なら市場の暴落も街の秘密も同じ順番で来る。学びを実行で検証できる。'));
   const go = el('button', { class: 'btn primary', onclick: () => {
     const r = game.reincarnate(state, meta, { skillForBrag: chosen, sameWorld });
-    meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.selected = null; ui.deep = {}; ui.mcKey = '';
+    meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.selected = null; ui.deep = {}; ui.mcKey = ''; ui.result = null;
+    if (ui.preset !== 'custom') applyPreset(ui.preset, true);
     closeModal(); render(); game.saveRun(state); play('reborn');
     toast('epic', `第${state.life.n}生`, `${r.sameWorld ? '同じ世界に' : ''}転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。${r.titles?.length ? `称号: ${r.titles.map(t => t.name).join('・')}` : ''}`);
   } }, '転生する ▶');
@@ -701,6 +703,7 @@ function replayWorld(seed) {
     if (state.life.alive) game.endLife(state, 'voluntary');
     const r = game.reincarnate(state, meta, { skillForBrag: 'guts', seed });
     meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.result = null; ui.selected = null; ui.deep = {}; ui.mcKey = '';
+    if (ui.preset !== 'custom') applyPreset(ui.preset, true);
     closeModal(); render(); game.saveRun(state); play('reborn');
     toast('epic', `第${state.life.n}生`, `seed ${seed} の世界に生まれ直した。前回と同じ暴落が、同じ年に来る。`);
   };
@@ -718,7 +721,8 @@ function worldUrl(seed) { const u = new URL(location.href); u.search = `?seed=${
 function openHelp(first) {
   const slides = [
     el('div', { class: 'slide' }, el('h3', {}, '人生はゲーム。死は終わりではない。'), el('ul', {},
-      el('li', {}, '1 ターン = 1 年。22 歳、現金 300 万から始まる。時間 100 とお金の配分を決めて「今年を終える」。'),
+      el('li', {}, '毎日開く。「今日のクエスト」を読み、現実でやった行動をタップする。押した瞬間にゲームへ反映され、連続日数が伸びる。'),
+      el('li', {}, '1 ターン = 1 年。22 歳、現金 300 万から始まる。方針を 4 択で選んで「今年を終える」。細かく触るなら「フル画面」。'),
       el('li', {}, '死ぬか、破産するか、自分で転生を選ぶまで続く。スキル XP は次の人生に全部持ち越す。'),
       el('li', {}, '失敗は自慢ポイントになり、転生時に XP へ変わる。却下された買い付けも、損失も、破産も。'),
       el('li', {}, '暴落の年は「アラモの時」。エネルギー +40、売主は投げ売りを始める。最悪の時が最高の時。'),
@@ -734,7 +738,8 @@ function openHelp(first) {
       ].map(([a, b]) => el('tr', {}, el('td', {}, a), el('td', { class: 'muted' }, b))))))),
     el('div', { class: 'slide' }, el('h3', {}, '操作'), el('ul', {},
       el('li', {}, el('kbd', {}, 'Enter'), ' で年送り、', el('kbd', {}, 'Esc'), ' でモーダルを閉じる。'),
-      el('li', {}, '街の地区をクリック → 偵察先に追加（最大 3）→ 売り物に「買い付け」→ 提示額と LTV を決める。年を終えると結果が出る。'),
+      el('li', {}, '「攻める」を選ぶと安い売り物 3 本に 70%（届かなければ半額）で自動で買い付けが出る。フル画面では街の地区をクリック → 偵察先に追加 → 売り物に「買い付け」→ 提示額と LTV を自分で決められる。'),
+      el('li', {}, '「実績」に現実の行動の台帳。数字が出ていない価値観は、まだ行動になっていない。'),
       el('li', {}, '本棚は読書時間 10 につき 1 冊。同じ年に買い付けか株の買い増しをすると XP 2 倍。'),
       el('li', {}, '不労所得が生活費を超えたら FIRE。会社を辞めて時間が増える。'),
       el('li', {}, '保存は自動（この端末のブラウザ）。「転生する」で恐怖を捨てた者は胆力 +100。'))),
@@ -773,7 +778,7 @@ function applyPreset(id, silent = false) {
 
 function quickOffersFor(ratio) {
   const lv = skillLevels(state);
-  const income = state.history[state.history.length - 1]?.income || state.work.salary;
+  const income = game.loanIncome(state, decisions);
   const out = [];
   for (const l of [...state.city.listings].sort((a, b) => a.ask - b.ask)) {
     const price = l.ask * ratio;
@@ -821,7 +826,7 @@ function renderDaily() {
   const seg = el('span', { class: 'seg' }, ...[0.7, 0.5].map(r => el('button', { 'aria-pressed': ui.quickRatio === r ? 'true' : 'false', onclick: () => { ui.quickRatio = r; renderDaily(); } }, `${Math.round(r * 100)}%（${counts[r]}）`)));
   const qo = ui.quick ? quickOffersFor(ui.quickRatio) : [];
   plan.append(el('div', { class: 'quick' },
-    el('button', { class: 'btn sm ' + (ui.quick ? 'on' : ''), onclick: () => { ui.quick = !ui.quick; if (ui.preset !== 'custom' && !!PRESETS[ui.preset].quick !== ui.quick) customized(); renderDaily(); } }, ui.quick ? `安い売り物 ${qo.length} 本に買い付けを出す` : '安い売り物 3 本に買い付けを出す'),
+    el('button', { class: 'btn sm ' + (ui.quick ? 'on' : ''), onclick: () => { ui.quick = !ui.quick; if (ui.preset !== 'custom' && !!PRESETS[ui.preset]?.quick !== ui.quick) customized(); renderDaily(); } }, ui.quick ? `安い売り物 ${qo.length} 本に買い付けを出す` : '安い売り物 3 本に買い付けを出す'),
     seg,
     el('span', { class: 'hint' }, ui.quick ? (qo.length ? `${Math.round(ui.quickRatio * 100)}% で届く売り物が ${qo.length} 件。半額でも常識外でもいい。却下されても学びと自慢になる。` : '今の現金では半額でも届かない。数年貯めるか、フル画面で株を取り崩す。') : '「行動すると事態が動く」を 1 タップで。'),
     el('button', { class: 'btn sm ghost', onclick: () => setMode('full') }, '詳細（フル画面）')));
@@ -830,7 +835,7 @@ function renderDaily() {
   // 賢人
   const council = $('d-council'); council.innerHTML = '';
   const advs = currentAdvice();
-  const dayIdx = (Math.floor(Date.now() / 86400000) + state.life.year) % ADVISORS.length;
+  const dayIdx = ((dayIndex(today) + state.life.year) % ADVISORS.length + ADVISORS.length) % ADVISORS.length;
   const show = ui.showAll ? ADVISORS : [ADVISORS[dayIdx]];
   council.append(el('h2', {}, ui.showAll ? '賢人会議' : '今日の賢人', el('span', { class: 'eyebrow' }, 'Council')));
   for (const a of show) {

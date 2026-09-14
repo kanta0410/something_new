@@ -106,3 +106,23 @@ test('reincarnate with sameWorld reuses the seed', () => {
   assert.equal(r.state.seed, 4242);
   assert.deepEqual(r.state.city.districts.map(x => x.name), s.city.districts.map(x => x.name));
 });
+
+test('salary is paid in the retirement year and skipped offers are not counted', () => {
+  let paid59 = null;
+  for (let seed = 31; seed < 60 && paid59 === null; seed++) {
+    const s = newGame(defaultMeta(), seed);
+    while (s.life.alive && s.life.age < 61) {
+      const age = s.life.age, employedBefore = s.work.employed && s.work.salary > 0;
+      const r = endYear(s, defaultDecisions(s));
+      if (age === 59) { if (employedBefore) paid59 = r.income.salary; break; }
+    }
+  }
+  assert.ok(paid59 > 300, `salary at 59 = ${paid59}`);
+  const t = newGame(defaultMeta(), 32);
+  const d = defaultDecisions(t);
+  const big = [...t.city.listings].sort((a, b) => b.ask - a.ask)[0];
+  d.offers = [{ listingId: big.id, bidRatio: 1.0, ltv: 0 }];
+  const r = endYear(t, d);
+  assert.equal(r.offers[0].skipped, true);
+  assert.equal(t.flags.offersMade, 0);
+});

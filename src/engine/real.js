@@ -93,5 +93,45 @@ export function ledgerText(meta, today = todayKey()) {
   const days = Object.keys(d.days).length;
   const lines = [`転生クオンツ 実績台帳 ${today}`, `行動した日数 ${days} / 連続 ${currentStreak(meta, today)} 日（最長 ${d.bestStreak}）/ フルコンボ ${d.comboDays} 日`];
   for (const a of REAL_ACTIONS) lines.push(`${a.short}: ${d.totals[a.id] || 0} 回`);
+  const notes = recentNotes(meta, 14, today);
+  if (notes.length) { lines.push('— 言語化メモ —'); for (const n of notes) lines.push(`${n.date} ${n.text}`); }
   return lines.join('\n');
+}
+
+/** 日替わりクエスト。6 行動のどれかを、具体的な現実の指示にする。 */
+export const QUESTS = [
+  { action: 'offer', text: '気になる物件 1 件に、半額で買い付けの連絡を入れる。断られたら自慢の材料。' },
+  { action: 'offer', text: '売り出し中の物件に「◯円なら即決」と 1 本メールする。相場の 70% でいい。' },
+  { action: 'offer', text: '不動産屋に「指値で通った事例を 1 つ教えてほしい」と聞く。それも申込のうち。' },
+  { action: 'offer', text: '仕事でも私事でもいい。今日 1 つ、頼まれていない提案を出す。' },
+  { action: 'scout', text: '自転車で知らない路地を 20 分。「売」の札と空き家を数える。' },
+  { action: 'scout', text: '配達員か工事の人と 1 分話す。その地域で最近変わったことを聞く。' },
+  { action: 'scout', text: '駅から徒歩 15 分圏の外側を 1 本歩く。家賃の掲示を 3 枚撮る。' },
+  { action: 'read', text: '『バフェットからの手紙』を 20 分。今年の手紙の 1 段落を書き写す。' },
+  { action: 'read', text: 'ソロスの本を 20 分。「反射性」を自分の言葉で 1 文にする。' },
+  { action: 'read', text: '読みかけの本を 20 分。読んだ瞬間に実行できることを 1 つ選ぶ。' },
+  { action: 'give', text: '誰かに自分の知識を 1 つ、下心なしで教える。返事は求めない。' },
+  { action: 'give', text: '達成している人に「会いたい」と連絡する。それ自体がギブになる書き方で。' },
+  { action: 'give', text: '過去に助けてくれた人に、近況を一行だけ送る。' },
+  { action: 'verbalize', text: '今日の最大の支出を 1 つ選び、「それをやると何が得か」を 1 文で書く。' },
+  { action: 'verbalize', text: '今の投資を 1 つ選び、「バフェットならどう見るか」を 3 行で書く。' },
+  { action: 'verbalize', text: '「同じ習慣を惰性で続けていないか」を 1 つ挙げ、切るか続けるかを決める。' },
+  { action: 'brag', text: '最近の失敗を 1 つ、誰かに笑い話として話す。オチまで付ける。' },
+  { action: 'brag', text: '却下された申込・断られた提案を数える。今月の合計を誰かに言う。' },
+];
+export function dayIndex(today = todayKey()) { const [y, m, d] = today.split('-').map(Number); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); }
+export function questFor(today = todayKey()) { return QUESTS[((dayIndex(today) % QUESTS.length) + QUESTS.length) % QUESTS.length]; }
+
+/** 今日の言語化メモ（1 日 1 行、200 字まで） */
+export function setNote(meta, text, today = todayKey()) {
+  const d = ensureDaily(meta); d.notes = d.notes || {};
+  const t = String(text || '').trim().slice(0, 200);
+  if (t) d.notes[today] = t; else delete d.notes[today];
+  const keys = Object.keys(d.notes).sort(); while (keys.length > 400) delete d.notes[keys.shift()];
+  return t;
+}
+export function getNote(meta, today = todayKey()) { return (ensureDaily(meta).notes || {})[today] || ''; }
+export function recentNotes(meta, n = 14, today = todayKey()) {
+  const notes = ensureDaily(meta).notes || {};
+  return Object.keys(notes).filter(k => k <= today).sort().reverse().slice(0, n).map(k => ({ date: k, text: notes[k] }));
 }

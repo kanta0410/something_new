@@ -9,6 +9,8 @@ import { computeScore, lifeSummary } from '../engine/score.js';
 import { netWorth } from '../engine/life.js';
 import { fitCanvas, drawNetWorth, drawMarket, drawFan, drawSparkline, drawRadar } from './charts.js';
 import { drawCity, districtAt } from './cityView.js';
+import { REAL_ACTIONS, recordRealAction, doneToday, currentStreak, ensureDaily, recentDays, ledgerText, todayKey } from '../engine/real.js';
+import { play, setSoundEnabled } from './sound.js';
 
 const fmt = game.formatMoney;
 const $ = (id) => document.getElementById(id);
@@ -41,13 +43,25 @@ const QUANT_TABS = [
 ];
 
 let meta, state, decisions, lastReport = null;
-const ui = { selected: null, hover: null, tab: 'stats', mc: null, mcKey: '', sample: undefined, blink: true, deep: {}, modal: null, revealed: 0 };
+const ui = { selected: null, hover: null, tab: 'stats', mc: null, mcKey: '', sample: undefined, blink: true, deep: {}, modal: null, revealed: 0, mode: 'daily', preset: 'guard', quick: false, quickRatio: 0.7, showAll: false, result: null };
+
+const PRESETS = {
+  guard: { name: '守る', desc: '読書 30・遊ぶ 30。貯蓄 50%、株 50%。基本形。', time: { reading: 30, scouting: 10, networking: 20, fun: 30, hustle: 10 }, savingsRate: 0.5, stockAlloc: 0.5 },
+  attack: { name: '攻める', desc: '偵察 40・人脈 25。貯蓄 70%、株 70%。安い売り物に買い付けを出す。', time: { reading: 15, scouting: 40, networking: 25, fun: 10, hustle: 10 }, savingsRate: 0.7, stockAlloc: 0.7, quick: true },
+  learn: { name: '学ぶ', desc: '読書 45。本を 2 冊読む。貯蓄 60%、株 60%。', time: { reading: 45, scouting: 10, networking: 25, fun: 15, hustle: 5 }, savingsRate: 0.6, stockAlloc: 0.6, books: 2 },
+  play: { name: '遊ぶ', desc: '遊ぶ 50。楽しさは死亡率も下げる。貯蓄 30%、株 50%。', time: { reading: 10, scouting: 10, networking: 20, fun: 50, hustle: 10 }, savingsRate: 0.3, stockAlloc: 0.5 },
+};
 
 // ───────────────────────── 起動 ─────────────────────────
 function boot() {
   meta = game.loadMeta();
   state = game.loadRun() || game.newGame(meta);
   decisions = game.defaultDecisions(state);
+  ensureDaily(meta);
+  setSoundEnabled(meta.sound !== false);
+  ui.mode = meta.mode === 'full' ? 'full' : 'daily';
+  ui.preset = meta.preset || 'guard';
+  if (ui.preset !== 'custom') applyPreset(ui.preset, true);
   buildStaticControls();
   bindGlobal();
   render();
@@ -75,11 +89,14 @@ function buildStaticControls() {
       el('span', { class: 'lbl' }, r.label), input, el('span', { class: 'val num', id: `tv-${r.id}` }, '20'),
       el('span', { class: 'cap' }, r.cap)));
   }
-  $('in-save').addEventListener('input', (e) => { decisions.savingsRate = Number(e.target.value) / 100; markDirty(); renderDecisions(); });
-  $('in-stock').addEventListener('input', (e) => { decisions.stockAlloc = Number(e.target.value) / 100; markDirty(); renderDecisions(); });
+  $('in-save').addEventListener('input', (e) => { decisions.savingsRate = Number(e.target.value) / 100; customized(); renderDecisions(); });
+  $('in-stock').addEventListener('input', (e) => { decisions.stockAlloc = Number(e.target.value) / 100; customized(); renderDecisions(); });
   $('in-fire').addEventListener('change', (e) => { decisions.quitJob = e.target.checked; });
   $('btn-end').addEventListener('click', endYear);
-  $('btn-city').addEventListener('click', () => { $('panel-city').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); });
+  $('btn-city').addEventListener('click', () => { if (ui.mode !== 'full') setMode('full'); $('panel-city').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); });
+  $('btn-mode').addEventListener('click', () => setMode(ui.mode === 'full' ? 'daily' : 'full'));
+  $('btn-ledger').addEventListener('click', openLedger);
+  $('btn-sound').addEventListener('click', () => { meta.sound = meta.sound === false; setSoundEnabled(meta.sound !== false); game.saveMeta(meta); renderSoundBtn(); if (meta.sound !== false) play('check'); });
   $('btn-books').addEventListener('click', openBooks);
   $('btn-hall').addEventListener('click', openHall);
   $('btn-help').addEventListener('click', () => openHelp(false));
@@ -98,9 +115,11 @@ function setTime(id, value) {
   if (cur > 0) for (const k of others) t[k] = t[k] * rest / cur;
   else for (const k of others) t[k] = rest / others.length;
   t[id] = value;
-  markDirty();
+  customized();
   renderDecisions();
 }
+
+function customized() { ui.preset = 'custom'; meta.preset = 'custom'; markDirty(); }
 
 function markDirty() { ui.mcKey = ''; if (ui.tab === 'fan') scheduleFan(); }
 
@@ -116,16 +135,34 @@ function bindGlobal() {
 // ───────────────────────── 描画 ─────────────────────────
 function render() {
   renderHeader();
-  renderDecisions();
-  renderSkills();
-  renderCharts();
-  renderCity();
-  renderProps();
-  renderQuant();
-  renderCouncil();
-  renderLog();
+  renderSoundBtn();
+  $('daily').hidden = ui.mode !== 'daily';
+  $('full').hidden = ui.mode !== 'full';
+  $('btn-mode').textContent = ui.mode === 'full' ? '毎日モード' : 'フル画面';
+  $('btn-city').hidden = ui.mode !== 'full';
   $('books-count').textContent = decisions.books.length ? `(${decisions.books.length})` : '';
+  if (ui.mode === 'full') {
+    renderDecisions();
+    renderSkills();
+    renderCharts();
+    renderCity();
+    renderProps();
+    renderQuant();
+    renderCouncil();
+    renderLog();
+  } else {
+    renderDaily();
+  }
 }
+
+function setMode(mode) {
+  ui.mode = mode; meta.mode = mode; game.saveMeta(meta);
+  render();
+  if (mode === 'full') requestAnimationFrame(renderCharts);
+  window.scrollTo({ top: 0 });
+}
+
+function renderSoundBtn() { const b = $('btn-sound'); const on = meta.sound !== false; b.textContent = on ? '音 ON' : '音 OFF'; b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
 
 function renderHeader() {
   const st = game.status(state);
@@ -505,12 +542,16 @@ function toast(kind, title, text) {
 // ───────────────────────── 年送り ─────────────────────────
 function endYear() {
   if (!state.life.alive || ui.modal) return;
+  const nwBefore = netWorth(state);
+  if (ui.mode === 'daily' && ui.quick) decisions.offers = quickOffersFor(ui.quickRatio);
   let report;
   try { report = game.endYear(state, decisions); } catch (e) { fail(e); return; }
   lastReport = report;
   decisions = game.defaultDecisions(state);
+  if (ui.preset !== 'custom') applyPreset(ui.preset, true);
   ui.deep = {};
   ui.mcKey = '';
+  ui.result = { report, nwBefore, nwAfter: netWorth(state), year: state.life.year - 1 };
   const alamo = report.events.some(e => e.kind === 'alamo');
   const after = () => {
     render();
@@ -520,8 +561,10 @@ function endYear() {
     if (report.severance) queue.push(['good', '退職金', `${fmt(report.severance)} が振り込まれた。さて、どうする？`]);
     for (const sev of ['epic', 'bad', 'good']) for (const e of report.events) if (e.severity === sev && e.kind !== 'alamo') queue.push([sev, e.title, e.text]);
     $('toasts').innerHTML = '';
-    for (const [k, t, x] of queue.slice(0, 4)) toast(k, t, x);
+    for (const [k, t, x] of queue.slice(0, ui.mode === 'daily' ? 2 : 4)) toast(k, t, x);
+    if (report.offers.some(o => o.accepted)) play('win'); else if (report.yearResult.totalReturn < -0.1) play('lose'); else play('tick');
     game.saveRun(state);
+    if (ui.mode === 'daily') { const r = $('d-result'); if (r) r.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' }); }
     if (report.death) setTimeout(openReborn, 400);
   };
   if (alamo) showAlamo(after); else after();
@@ -532,6 +575,7 @@ function showAlamo(done) {
   const ov = el('div', { class: 'alamo', role: 'alert' }, el('div', { class: 'big' }, 'REMEMBER THE ALAMO'), el('div', { class: 'small' }, '最悪の時が最高の時。エネルギー +40。売主は投げ売りを始めた。'));
   if (reducedMotion()) ov.style.animation = 'none';
   root.append(ov);
+  play('alamo');
   setTimeout(() => { ov.remove(); done(); }, 1200);
 }
 
@@ -597,10 +641,11 @@ function openReborn() {
   const go = el('button', { class: 'btn primary', onclick: () => {
     const r = game.reincarnate(state, meta, { skillForBrag: chosen });
     meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.selected = null; ui.deep = {}; ui.mcKey = '';
-    closeModal(); render(); game.saveRun(state);
+    closeModal(); render(); game.saveRun(state); play('reborn');
     toast('epic', `第${state.life.n}生`, `転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。`);
   } }, '転生する ▶');
-  openModal(`第${state.life.n}生、享年 ${sum.age} 歳`, body, [go], { noClose: true, wide: true });
+  const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(shareText(score, sum), copyBtn) }, '結果をコピー');
+  openModal(`第${state.life.n}生、享年 ${sum.age} 歳`, body, [copyBtn, go], { noClose: true, wide: true });
   requestAnimationFrame(() => {
     try {
       drawSparkline($('cv-spark'), state.history.map(h => h.netWorth), { color: '#D9A441', baseline: 0 });
@@ -662,6 +707,185 @@ function openHelp(first) {
   show();
   openModal('遊び方', body, [prev, next], { foot: dots, wide: true });
   if (first && !meta.tutorialDone) { meta.tutorialDone = true; game.saveMeta(meta); }
+}
+
+// ───────────────────────── 毎日モード ─────────────────────────
+function applyPreset(id, silent = false) {
+  const p = PRESETS[id]; if (!p) return;
+  ui.preset = id; meta.preset = id;
+  decisions.time = { ...p.time };
+  decisions.savingsRate = p.savingsRate; decisions.stockAlloc = p.stockAlloc;
+  decisions.books = [];
+  if (p.books) {
+    const read = new Set(state.flags.booksRead || []);
+    decisions.books = availableBooks(state).filter(b => !read.has(b.id)).slice(0, p.books).map(b => b.id);
+    if (decisions.books.length < p.books) decisions.books = availableBooks(state).slice(0, p.books).map(b => b.id);
+  }
+  ui.quick = !!p.quick;
+  if (p.quick) {
+    // 偵察先は安い売り物がある地区を優先
+    const cheap = [...state.city.listings].sort((a, b) => a.ask - b.ask).map(l => l.districtId);
+    decisions.scoutTargets = [...new Set(cheap)].slice(0, 3);
+  }
+  markDirty();
+  if (!silent) { game.saveMeta(meta); render(); }
+}
+
+function quickOffersFor(ratio) {
+  const lv = skillLevels(state);
+  const income = state.history[state.history.length - 1]?.income || state.work.salary;
+  const out = [];
+  for (const l of [...state.city.listings].sort((a, b) => a.ask - b.ask)) {
+    const price = l.ask * ratio;
+    const cap = maxLtv({ commLevel: lv.comm, network: state.meters.network, income, price });
+    const need = price * (1 - cap) + price * game.CLOSING_COST;
+    if (need <= state.money.cash * 0.95) { out.push({ listingId: l.id, bidRatio: ratio, ltv: cap }); if (out.length >= game.MAX_OFFERS) break; }
+  }
+  return out;
+}
+
+function renderDaily() {
+  const today = todayKey();
+  const streak = currentStreak(meta, today);
+  const done = doneToday(meta, today);
+  const st = game.status(state);
+  // 上段
+  const top = $('d-top'); top.innerHTML = '';
+  top.append(el('span', { class: 'streak num' }, `${streak} 日`, el('small', {}, `連続で現実に動いた日${ensureDaily(meta).bestStreak > streak ? `（最長 ${ensureDaily(meta).bestStreak}）` : ''}`)),
+    el('span', { class: 'num' }, `第${st.life}生 · ${st.age}歳 · ${fmt(st.netWorth)}`),
+    el('span', { class: 'today num' }, today));
+  // 今日の現実
+  const real = $('d-real'); real.innerHTML = '';
+  real.append(el('h2', {}, '今日の現実', el('span', { class: 'cnt num' }, `${done.length} / ${REAL_ACTIONS.length}`), el('span', { class: 'eyebrow' }, 'Real world')));
+  for (const a of REAL_ACTIONS) {
+    const isDone = done.includes(a.id);
+    real.append(el('button', { class: 'real-row' + (isDone ? ' done' : ''), disabled: isDone ? 'true' : null, onclick: () => onRealAction(a) },
+      el('span', { class: 'box' }, isDone ? '✓' : ''), el('span', { class: 'lbl' }, a.label), el('span', { class: 'eff' }, a.effect)));
+  }
+  real.append(el('p', { class: 'hint', style: 'margin-top:8px' }, done.length === REAL_ACTIONS.length ? 'フルコンボ。エネルギー +20。今日は勝ちだ。' : '押した瞬間にゲームへ反映される。1 日 1 回ずつ。6 つ全部でエネルギー +20。嘘をつくと自分が損をするだけ。'));
+  // 今年の方針
+  const plan = $('d-plan'); plan.innerHTML = '';
+  plan.append(el('h2', {}, '今年の方針', el('span', { class: 'cnt num' }, `${state.life.year}年`), el('span', { class: 'eyebrow' }, 'Plan')));
+  const grid = el('div', { class: 'presets' });
+  for (const [id, p] of Object.entries(PRESETS)) grid.append(el('button', { class: 'preset' + (ui.preset === id ? ' on' : ''), onclick: () => applyPreset(id) }, el('b', {}, p.name), el('span', {}, p.desc)));
+  plan.append(grid);
+  const counts = { 0.7: quickOffersFor(0.7).length, 0.5: quickOffersFor(0.5).length };
+  if (ui.quick && counts[ui.quickRatio] === 0 && counts[0.5] > 0 && ui.quickRatio !== 0.5) ui.quickRatio = 0.5; // 70% で届かなければ半額で出す
+  const seg = el('span', { class: 'seg' }, ...[0.7, 0.5].map(r => el('button', { 'aria-pressed': ui.quickRatio === r ? 'true' : 'false', onclick: () => { ui.quickRatio = r; renderDaily(); } }, `${Math.round(r * 100)}%（${counts[r]}）`)));
+  const qo = ui.quick ? quickOffersFor(ui.quickRatio) : [];
+  plan.append(el('div', { class: 'quick' },
+    el('button', { class: 'btn sm ' + (ui.quick ? 'on' : ''), onclick: () => { ui.quick = !ui.quick; if (ui.preset !== 'custom' && !!PRESETS[ui.preset].quick !== ui.quick) customized(); renderDaily(); } }, ui.quick ? `安い売り物 ${qo.length} 本に買い付けを出す` : '安い売り物 3 本に買い付けを出す'),
+    seg,
+    el('span', { class: 'hint' }, ui.quick ? (qo.length ? `${Math.round(ui.quickRatio * 100)}% で届く売り物が ${qo.length} 件。半額でも常識外でもいい。却下されても学びと自慢になる。` : '今の現金では半額でも届かない。数年貯めるか、フル画面で株を取り崩す。') : '「行動すると事態が動く」を 1 タップで。'),
+    el('button', { class: 'btn sm ghost', onclick: () => setMode('full') }, '詳細（フル画面）')));
+  const t = decisions.time;
+  plan.append(el('p', { class: 'hint', style: 'margin-top:8px' }, `時間: 読書 ${Math.round(t.reading)} · 偵察 ${Math.round(t.scouting)} · 人脈 ${Math.round(t.networking)} · 遊ぶ ${Math.round(t.fun)} · 副業 ${Math.round(t.hustle)} ／ 貯蓄率 ${Math.round(decisions.savingsRate * 100)}% ／ 株式 ${Math.round(decisions.stockAlloc * 100)}%${decisions.books.length ? ` ／ 本 ${decisions.books.length} 冊` : ''}${ui.preset === 'custom' ? ' ／ 手動調整あり' : ''}`));
+  // 賢人
+  const council = $('d-council'); council.innerHTML = '';
+  const advs = currentAdvice();
+  const dayIdx = (Math.floor(Date.now() / 86400000) + state.life.year) % ADVISORS.length;
+  const show = ui.showAll ? ADVISORS : [ADVISORS[dayIdx]];
+  council.append(el('h2', {}, ui.showAll ? '賢人会議' : '今日の賢人', el('span', { class: 'eyebrow' }, 'Council')));
+  for (const a of show) {
+    const adv = advs.find(x => x.id === a.id) || { text: '…' };
+    const row = el('div', { class: 'd-council' }, el('div', { class: 'mono-circle', style: `background:${a.color}` }, a.initial),
+      el('div', {}, el('div', { class: 'who' }, el('span', { class: 'nm' }, a.name), adv.focus ? el('span', { class: 'focus' }, adv.focus) : null), el('div', { class: 'speech' }, adv.text)));
+    const deep = ui.deep[a.id];
+    if (deep) row.lastChild.append(el('div', { class: `speech ${deep.err ? 'err' : 'deep'}` }, deep.text));
+    if (ui.sample) row.lastChild.append(el('button', { class: 'btn sm ghost', style: 'margin-top:6px', onclick: () => askDeep(a.id) }, deep?.loading ? '考え中…' : 'Claude に深く聞く'));
+    council.append(row);
+  }
+  council.append(el('button', { class: 'btn sm ghost', style: 'margin-top:8px', onclick: () => { ui.showAll = !ui.showAll; renderDaily(); } }, ui.showAll ? '一人だけにする' : '3 人とも聞く'));
+  // 下部の副操作（モバイルではバーから隠れる分）
+  const foot = $('d-foot'); foot.innerHTML = '';
+  foot.append(el('button', { class: 'btn sm', onclick: openBooks }, `本棚${decisions.books.length ? ` (${decisions.books.length})` : ''}`),
+    el('button', { class: 'btn sm', onclick: openHall }, '殿堂'),
+    el('button', { class: 'btn sm', onclick: () => openHelp(false) }, '遊び方'),
+    el('button', { class: 'btn sm ghost', onclick: () => $('btn-sound').click() }, meta.sound === false ? '音 OFF' : '音 ON'),
+    el('button', { class: 'btn sm danger', onclick: () => { confirmReborn(); $('reborn-wrap').scrollIntoView({ block: 'nearest' }); } }, '転生する'));
+  // 結果
+  const res = $('d-result');
+  if (ui.result && ui.result.report) {
+    const { report, nwBefore, nwAfter, year } = ui.result;
+    const delta = nwAfter - nwBefore;
+    res.hidden = false; res.innerHTML = '';
+    res.append(el('h2', {}, `${year}年の結果`, el('span', { class: 'eyebrow' }, 'Result')));
+    res.append(el('div', { class: `delta num ${delta >= 0 ? 'pos' : 'neg'}` }, `${delta >= 0 ? '+' : ''}${fmt(delta)}`, el('small', {}, `純資産 ${fmt(nwBefore)} → ${fmt(nwAfter)}`)));
+    const ul = el('ul');
+    const yr = report.yearResult;
+    ul.append(el('li', {}, `市場 ${yr.totalReturn >= 0 ? '+' : ''}${(yr.totalReturn * 100).toFixed(1)}%${yr.crash ? '（アラモの時）' : ''}、金利 ${(yr.rate * 100).toFixed(2)}%`));
+    if (report.offers.length) ul.append(el('li', {}, `買い付け ${report.offers.length} 本 → 成立 ${report.offers.filter(o => o.accepted).length}。${report.offers.map(o => `${o.districtName} ${Math.round((o.bidRatio || 0) * 100)}% ${o.accepted ? '成立' : '却下'}`).join(' / ')}`));
+    if (report.income) ul.append(el('li', {}, `収入 ${fmt(report.income.net + report.income.hustle + (report.income.pension || 0))}、生活費 ${fmt(report.income.living)}、不労所得 ${fmt(report.income.passive || 0)}`));
+    for (const e of report.events.filter(e => ['epic', 'bad', 'good'].includes(e.severity)).slice(0, 3)) ul.append(el('li', { class: e.severity === 'bad' ? 'neg' : e.severity === 'epic' ? 'gold' : 'pos' }, `${e.title}: ${e.text}`));
+    for (const b of report.books || []) ul.append(el('li', { class: 'gold' }, `読了『${b.title || b.id}』${b.quote ? `「${b.quote}」` : ''}`));
+    res.append(ul);
+    res.append(el('div', { style: 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap' },
+      el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, 'もう 1 年 ▶'),
+      el('button', { class: 'btn ghost', onclick: () => setMode('full') }, 'フル画面で見る')));
+  } else {
+    res.hidden = false; res.innerHTML = '';
+    res.append(el('div', { class: 'big-end' }, el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, '今年を終える ▶')),
+      el('p', { class: 'hint', style: 'text-align:center;margin-top:8px' }, '今日の現実にチェックを入れてから、1 年進める。それだけ。'));
+  }
+}
+
+function onRealAction(a) {
+  const r = recordRealAction(meta, state, a.id);
+  if (!r.applied) return;
+  game.saveMeta(meta); game.saveRun(state);
+  play('check');
+  toast('good', a.short, a.effect);
+  if (r.combo) { toast('epic', 'フルコンボ', 'エネルギー +20。今日は勝ちだ。'); play('win'); }
+  if (r.milestone) streakFlash(r.milestone);
+  else if (r.streak > 1 && doneToday(meta).length === 1) toast('epic', `連続 ${r.streak} 日`, '続けた者が勝つ。');
+  renderHeader(); renderDaily();
+}
+
+function streakFlash(n) {
+  const root = $('alamo-root');
+  const ov = el('div', { class: 'streak-flash', role: 'alert' }, el('div', { class: 'big' }, `${n} DAYS`), el('div', { class: 'small' }, n >= 100 ? '百日。もう習慣ではなく人格だ。' : n >= 30 ? '三十日。同じ投資・同じ習慣を惰性で続けていないか、今日だけ自問しろ。' : '七日。恐怖を捨てた分だけ楽しめ。'));
+  if (reducedMotion()) ov.style.animation = 'none';
+  root.append(ov); play('streak');
+  setTimeout(() => ov.remove(), 1600);
+}
+
+function openLedger() {
+  const d = ensureDaily(meta); const today = todayKey();
+  const body = el('div');
+  body.append(el('div', { class: 'hall-stats' },
+    el('div', {}, el('span', { class: 'eyebrow' }, '連続'), el('span', { class: 'v num gold' }, `${currentStreak(meta, today)} 日`)),
+    el('div', {}, el('span', { class: 'eyebrow' }, '最長'), el('span', { class: 'v num' }, `${d.bestStreak} 日`)),
+    el('div', {}, el('span', { class: 'eyebrow' }, '行動した日'), el('span', { class: 'v num' }, Object.keys(d.days).length)),
+    el('div', {}, el('span', { class: 'eyebrow' }, 'フルコンボ'), el('span', { class: 'v num' }, d.comboDays))));
+  const heat = el('div', { class: 'heat' });
+  for (const day of recentDays(meta, 28, today)) heat.append(el('i', { class: (day.count >= 5 ? 'l3' : day.count >= 3 ? 'l2' : day.count >= 1 ? 'l1' : '') + (day.date === today ? ' today' : ''), title: `${day.date}: ${day.count}` }));
+  body.append(el('div', { class: 'eyebrow' }, '直近 28 日'), heat);
+  const t = el('table', { class: 'table' });
+  t.append(el('thead', {}, el('tr', {}, el('th', {}, '行動'), el('th', {}, '回数'), el('th', {}, 'ゲームへの効果'))));
+  const tb = el('tbody');
+  for (const a of REAL_ACTIONS) tb.append(el('tr', {}, el('td', {}, a.label), el('td', { class: 'num' }, d.totals[a.id] || 0), el('td', { class: 'muted' }, a.effect)));
+  t.append(tb); body.append(el('div', { class: 'table-wrap' }, t));
+  body.append(el('p', { class: 'hint', style: 'margin-top:10px' }, 'これが実社会での検証記録。買い付けの本数、現地を見た回数、与えた回数。数字が出ていない価値観は、まだ行動になっていない。'));
+  const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(ledgerText(meta, today), copyBtn) }, '台帳をコピー');
+  openModal('実績台帳', body, [copyBtn], { wide: true });
+}
+
+function shareText(score, sum) {
+  const cause = { natural: '天寿', illness: '病', bankrupt: '破産', voluntary: '自主転生' }[state.life.deathCause] || '';
+  return [`転生クオンツ 第${state.life.n}生｜享年 ${sum.age}歳（${cause}）｜純資産 ${fmt(sum.netWorth)}`,
+    `スコア ${score.total}（富 ${score.wealth} 楽 ${score.fun} 学 ${score.learning} 縁 ${score.network} 自慢 ${score.brag}）`,
+    `買い付け ${sum.offersMade} 本／成立 ${sum.offersAccepted}｜アラモ ${sum.alamoCount} 回｜遺言「${state.life.epitaph || ''}」`,
+    `現実の連続行動 ${currentStreak(meta)} 日｜seed ${state.seed}`].join('\n');
+}
+
+function copyText(text, btn) {
+  const ok = () => { if (btn) { const t = btn.textContent; btn.textContent = 'コピーした'; setTimeout(() => { btn.textContent = t; }, 1500); } };
+  const fallback = () => {
+    const ta = el('textarea', { readonly: 'true', style: 'width:100%;height:120px;background:var(--surface2);color:var(--text);border:1px solid var(--rule);font-family:var(--font-num);font-size:12px;padding:8px' });
+    ta.value = text; const wrap = el('div', {}, el('p', { class: 'hint', style: 'margin-bottom:6px' }, 'クリップボードに書けなかった。全選択してコピーしてほしい。'), ta);
+    (ui.modal ? ui.modal.querySelector('.modal-body') : document.body).append(wrap); ta.focus(); ta.select();
+  };
+  try { navigator.clipboard.writeText(text).then(ok, fallback); } catch (_) { fallback(); }
 }
 
 // ───────────────────────── 起動 ─────────────────────────

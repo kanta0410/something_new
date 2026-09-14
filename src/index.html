@@ -27,7 +27,16 @@
   </dl>
 </header>
 
-<main class="grid">
+<section id="daily" class="daily" hidden>
+  <div class="d-top" id="d-top"></div>
+  <div class="d-card" id="d-real"></div>
+  <div class="d-card" id="d-plan"></div>
+  <div class="d-card" id="d-council"></div>
+  <div class="d-card d-result" id="d-result" hidden></div>
+  <div class="d-foot" id="d-foot"></div>
+</section>
+
+<main class="grid" id="full">
   <section class="col" aria-label="今年の采配">
     <div class="panel">
       <h2 class="panel-title">今年の采配 <span class="eyebrow">Decisions</span></h2>
@@ -100,10 +109,13 @@
 
 <nav class="bar-actions" aria-label="操作">
   <button class="btn primary" id="btn-end">今年を終える ▶</button>
+  <button class="btn" id="btn-mode">フル画面</button>
+  <button class="btn" id="btn-ledger">実績</button>
   <button class="btn" id="btn-city">街と買い付け</button>
-  <button class="btn" id="btn-books">本棚 <span class="num" id="books-count"></span></button>
-  <button class="btn" id="btn-hall">殿堂</button>
-  <button class="btn" id="btn-help">遊び方</button>
+  <button class="btn sec" id="btn-books">本棚 <span class="num" id="books-count"></span></button>
+  <button class="btn sec" id="btn-hall">殿堂</button>
+  <button class="btn sec" id="btn-help">遊び方</button>
+  <button class="btn ghost sec" id="btn-sound" aria-pressed="true">音 ON</button>
   <span class="spacer"></span>
   <span id="reborn-wrap"><button class="btn danger" id="btn-reborn">転生する</button></span>
 </nav>

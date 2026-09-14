@@ -597,18 +597,22 @@ function stanceOf(advisorId, v, rule) {
  * @param {View} v
  * @returns {Rule}
  */
-function pickRule(advisorIndex, v) {
+function pickRule(advisorIndex, v, recent = []) {
   const adv = ADVISORS[advisorIndex].id;
-  let best = -Infinity;
-  let ties = [];
+  const hits = [];
   for (const rule of RULES) {
     if (rule.adv !== adv) continue;
     let hit = false;
     try { hit = !!rule.when(v); } catch { hit = false; }
-    if (!hit) continue;
-    if (rule.pri > best) { best = rule.pri; ties = [rule]; }
-    else if (rule.pri === best) ties.push(rule);
+    if (hit) hits.push(rule);
   }
+  if (!hits.length) return RULES.find(r => r.adv === adv);
+  hits.sort((a, b) => b.pri - a.pri);
+  // 直近に使ったルールは次点に譲る（同じ台詞が毎年続かないように）。全部使用済みなら最上位に戻る。
+  const fresh = hits.filter(r => !recent.includes(r.id));
+  const pool = fresh.length ? fresh : hits;
+  const best = pool[0].pri;
+  const ties = pool.filter(r => r.pri === best);
   // 同順位は (年 + 賢人添字) で決定的に選ぶ。乱数は使わない。
   const k = ((v.year + advisorIndex) % ties.length + ties.length) % ties.length;
   return ties[k];
@@ -622,8 +626,10 @@ function pickRule(advisorIndex, v) {
  */
 export function advise(state, ctx = {}) {
   const v = buildView(state, ctx);
+  const recentAll = (state && state.flags && state.flags.councilRecent) || {};
   return ADVISORS.map((a, i) => {
-    const rule = pickRule(i, v);
+    const recent = Array.isArray(recentAll[a.id]) ? recentAll[a.id] : [];
+    const rule = pickRule(i, v, recent);
     return {
       id: a.id,
       name: a.name,

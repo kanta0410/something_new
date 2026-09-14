@@ -381,8 +381,13 @@ function streams(state) {
 }
 
 function safeAdvise(state, yr) {
-  try { return advise(state, { yearResult: yr, quantLevel: unlockLevel(state) }); }
-  catch (e) { return []; }
+  try {
+    const advice = advise(state, { yearResult: yr, quantLevel: unlockLevel(state) });
+    // 直近 3 年に使ったルールを記録（同じ台詞の連続を避ける）
+    const recent = state.flags.councilRecent || (state.flags.councilRecent = {});
+    for (const a of advice) { const arr = recent[a.id] || (recent[a.id] = []); arr.push(a.rule); if (arr.length > 3) arr.splice(0, arr.length - 3); }
+    return advice;
+  } catch (e) { return []; }
 }
 
 /** 死ぬ（自主転生を含む） */

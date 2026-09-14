@@ -225,3 +225,29 @@ w_c     = 1 / (1 + exp(−β (U_c − U_f)))                    β=250、clamp 0
 - `npm test` → `node --test test/`。市場キャリブレーション、買い付け確率、破産、シリアライズ往復、スコア単調性。
 - `npm run sim` → `sim/` のヘッドレス方針（放置 / 堅実 / 金持ち父さん / ギャンブラー）で 200 人生を回し、純資産・スコア分布を表にする（バランス確認）。
 - `npm run shot` → Playwright で dist を開き、5 年進めてスクリーンショット。
+
+## 16. 毎日モード（実社会での検証）
+
+既定の画面。1 カラム、スマホ幅対応、PWA（`public/manifest.webmanifest`、`public/sw.js`）。
+
+- **今日の現実**（`src/engine/real.js`）: 6 行動（買い付け／偵察／読書／ギブ／言語化／自慢）。1 日 1 回、押した瞬間に `apply(state)` で XP・メーターへ反映。6 つ全部でエネルギー +20。`meta.daily` に日付ごとの記録・連続日数・行動別合計・言語化メモ。
+- **今日のクエスト**: 18 種を日付で決定的に回す（`questFor(date)`）。
+- **今年の方針**: プリセット 4 種（守る／攻める／学ぶ／遊ぶ）。攻めるは安い売り物 3 本に 70%（届かなければ 50%）で自動買い付け。
+- **結果カード**: 純資産の増減、市場、買い付け結果、主なイベント、読了。
+- **実績台帳**: 連続日数、直近 28 日、行動別回数、言語化メモ。コピー可。
+
+## 17. 称号（`src/engine/titles.js`）
+
+人生の終わりに `awardLifeTitles(meta, state, score)`、現実の連続日数で `awardStreakTitles`。`meta.titles` に永続。転生画面・殿堂・共有テキストに表示。
+
+## 18. 同じ世界で転生
+
+乱数は 3 本（`state.rngStates`）: 市場 `market`、街 `city`、人生 `life`。市場と街はプレイヤーの選択を一切読まないので、同じ seed なら同じ暴落が同じ年に来て、同じ秘密が同じ地区にある。転生時に `sameWorld: true`、殿堂の「もう一度」、URL `?seed=N&new=1`。
+
+## 19. 市場の最終定数
+
+§6 の定数は起点。キャリブレーション後の値は `src/engine/market.js` の `DEFAULT_PARAMS` が正。主な変更: μ_f=0.07、φ=0.05（割高側 ×1.3、|x|>0.2 で ×(1+4·超過)）、g=0.8 に外挿飽和 ecCap=0.025、σ_n=0.025、β=500、w_c ∈ [0.05, 0.85]、暴落ジャンプ（基礎 1%/月 + 0.2·max(0, x−0.15)·(0.5+w_c)、幅 0.15〜0.32、65% は本源価値にも反映、パニック +0.09 減衰 0.7）、バブル判定 x > 0.20。12,000 年で平均 7.8%、σ 20.8%、歪度 −0.09、暴落年 5.5%、20 年 CAGR < −2% が 1.7%。
+
+## 20. 配信
+
+`main` に push → GitHub Actions（`.github/workflows/pages.yml`）が `npm test && npm run build` → `gh-pages` ブランチへ配信 → GitHub Pages。Artifact 版（claude.ai）は `dist/artifact.html`（ラッパー無し、`sample` capability 付き）。

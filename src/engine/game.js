@@ -171,7 +171,11 @@ export function endYear(state, rawDecisions) {
   const nwStart = netWorth(state);
   const lastCrash = !!state.flags.lastCrash;
 
-  // 1. キャリア（定年時は退職金 = 最終給与 × 2）
+  // 1. 今年の収入と生活費（キャリア更新より先に確定する: life.js の契約）
+  const inc = computeIncome(state, d);
+  state.flags.peakSalary = Math.max(state.flags.peakSalary || 0, state.work.salary || 0);
+
+  // 2. キャリア（来年の給与・定年・リストラ。定年時は退職金 = 最終給与 × 2）
   const salaryBefore = state.work.salary || 0;
   const career = advanceCareer(state, d, rng);
   for (const t of career.events || []) { pushLog(state, 'money', t); report.careerEvents.push(t); }
@@ -182,9 +186,6 @@ export function endYear(state, rawDecisions) {
     report.severance = severance;
   }
 
-  // 2. 収入と生活費、先取り投資
-  const inc = computeIncome(state, d);
-  state.flags.peakSalary = Math.max(state.flags.peakSalary || 0, state.work.salary || 0);
   // 年金: 65 歳から。基礎 100万 + 厚生分（最高給与の 8%、上限 100万）
   inc.pension = state.life.age >= PENSION_AGE ? 100 + Math.min(100, 0.08 * (state.flags.peakSalary || 0)) : 0;
   if (inc.pension > 0 && state.life.age === PENSION_AGE) pushLog(state, 'money', `年金受給開始。年 ${fmt(inc.pension)}。`);
@@ -213,7 +214,7 @@ export function endYear(state, rawDecisions) {
   // 4. 買い付け
   const rejected = [];
   let bold = 0;
-  const grossIncome = inc.net + inc.hustle + (inc.rent || 0);
+  const grossIncome = loanIncomeFrom(inc);
   const mortgageRate = state.market.last?.mortgageRate ?? (state.market.rate + 0.012);
   for (const o of d.offers) {
     const listing = state.city.listings.find(l => l.id === o.listingId);
@@ -224,13 +225,13 @@ export function endYear(state, rawDecisions) {
     const ltv = clamp(Math.min(Number(o.ltv) || 0, cap), 0, 0.95);
     const cashNeeded = price * (1 - ltv) + price * CLOSING_COST;
     const dname = state.city.districts[listing.districtId]?.name || '';
-    state.flags.offersMade++;
-    addXp(state, 'comm', 10);
     if (state.money.cash < cashNeeded) {
       pushLog(state, 'bad', `${dname}への買い付け: 自己資金不足（必要 ${fmt(cashNeeded)}、手元 ${fmt(state.money.cash)}）。`);
       report.offers.push({ listing, accepted: false, reaction: '資金不足で提出できなかった', price, districtName: dname, skipped: true });
       continue;
     }
+    state.flags.offersMade++;
+    addXp(state, 'comm', 10);
     if (bidRatio <= 0.7) { addXp(state, 'guts', 25); bold++; }
     const res = evaluateOffer(state.city, listing.id, { bidRatio }, { commLevel: lv.comm, network: state.meters.network, energy: state.meters.energy, crash: lastCrash }, rng);
     if (res.accepted) {
@@ -376,8 +377,7 @@ export function endYear(state, rawDecisions) {
 function streams(state) {
   if (state.rngStates) return { rm: rngFromState(state.rngStates.market), rc: rngFromState(state.rngStates.city), rl: rngFromState(state.rngStates.life) };
   const legacy = state.rngState || [1, 0, 0];
-  const mk = () => rngFromState(legacy);
-  return { rm: mk(), rc: mk(), rl: mk() };
+  return { rm: rngFromState(legacy), rc: createRng(hashSeed('city:' + legacy[0])), rl: createRng(hashSeed('life:' + legacy[0])) };
 }
 
 function safeAdvise(state, yr) {
@@ -389,6 +389,10 @@ function safeAdvise(state, yr) {
     return advice;
   } catch (e) { return []; }
 }
+
+/** 融資審査に使う年収（手取り + 副業 + 家賃）。UI とエンジンで同じ定義を使う。 */
+function loanIncomeFrom(inc) { return (inc.net || 0) + (inc.hustle || 0) + (inc.rent || 0); }
+export function loanIncome(state, decisions) { return loanIncomeFrom(computeIncome(state, decisions || defaultDecisions(state))); }
 
 /** 死ぬ（自主転生を含む） */
 export function endLife(state, cause) {

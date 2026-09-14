@@ -194,3 +194,15 @@ test('score: components saturate below 1000, monotone in wealth, epitaph per cau
   const sum = lifeSummary(s, computeScore(s));
   for (const k of ['age', 'netWorth', 'peakNetWorth', 'offersMade', 'offersAccepted', 'alamoCount', 'failures']) assert.ok(k in sum, k);
 });
+
+test('council: the same rule does not repeat in consecutive years when alternatives exist', () => {
+  const s = fresh(21);
+  const seq = { buffett: [], soros: [], himmel: [] };
+  for (let i = 0; i < 30; i++) { const r = endYear(s, defaultDecisions(s)); if (!s.life.alive) break; for (const a of r.advice) seq[a.id].push(a.rule); }
+  for (const id of Object.keys(seq)) {
+    let repeats = 0;
+    for (let i = 1; i < seq[id].length; i++) if (seq[id][i] === seq[id][i - 1]) repeats++;
+    assert.ok(repeats <= 2, `${id} repeated ${repeats} times: ${seq[id].join(',')}`);
+    assert.ok(new Set(seq[id]).size >= 5, `${id} variety ${new Set(seq[id]).size}`);
+  }
+});

@@ -56,7 +56,14 @@ const PRESETS = {
 // ───────────────────────── 起動 ─────────────────────────
 function boot() {
   meta = game.loadMeta();
-  state = game.loadRun() || game.newGame(meta);
+  const q = new URLSearchParams(location.search);
+  const seedParam = q.get('seed');
+  const saved = game.loadRun();
+  if (seedParam && (!saved || q.get('new') === '1' || !saved.life.alive)) {
+    const seed = /^\d+$/.test(seedParam) ? Number(seedParam) >>> 0 : game.hashSeed(seedParam);
+    state = game.newGame(meta, seed);
+    history.replaceState(null, '', location.pathname);
+  } else state = saved || game.newGame(meta);
   decisions = game.defaultDecisions(state);
   ensureDaily(meta);
   setSoundEnabled(meta.sound !== false);
@@ -639,13 +646,18 @@ function openReborn() {
   const radios = el('div', { class: 'radios', style: 'margin-top:12px' });
   let chosen = 'guts';
   for (const s of SKILLS) radios.append(el('label', {}, el('input', { type: 'radio', name: 'brag-skill', value: s.id, checked: s.id === 'guts' ? 'true' : null, onchange: () => { chosen = s.id; } }), `${s.name} Lv${level(state.skills[s.id]?.xp || 0)}`));
-  body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, `自慢ポイント × 30 = ${state.brag.points * 30} XP を注ぐスキル`), radios,
-    el('p', { class: 'hint', style: 'margin-top:8px' }, 'スキル XP は全部持ち越す。次の人生は 22 歳、現金 300 万、新しい街、新しい市場。'));
+  body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, `自慢ポイント × 30 = ${state.brag.points * 30} XP を注ぐスキル`), radios);
+  let sameWorld = false;
+  const worlds = el('div', { class: 'radios', style: 'margin-top:10px' },
+    el('label', {}, el('input', { type: 'radio', name: 'world', checked: 'true', onchange: () => { sameWorld = false; } }), '新しい世界（新しい街と市場）'),
+    el('label', {}, el('input', { type: 'radio', name: 'world', onchange: () => { sameWorld = true; } }), `同じ世界で選択だけ変える（seed ${state.seed}）`));
+  body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, '転生先'), worlds,
+    el('p', { class: 'hint', style: 'margin-top:8px' }, 'スキル XP は全部持ち越す。次の人生は 22 歳、現金 300 万。同じ世界なら市場の暴落も街の秘密も同じ順番で来る。学びを実行で検証できる。'));
   const go = el('button', { class: 'btn primary', onclick: () => {
-    const r = game.reincarnate(state, meta, { skillForBrag: chosen });
+    const r = game.reincarnate(state, meta, { skillForBrag: chosen, sameWorld });
     meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.selected = null; ui.deep = {}; ui.mcKey = '';
     closeModal(); render(); game.saveRun(state); play('reborn');
-    toast('epic', `第${state.life.n}生`, `転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。${r.titles?.length ? `称号: ${r.titles.map(t => t.name).join('・')}` : ''}`);
+    toast('epic', `第${state.life.n}生`, `${r.sameWorld ? '同じ世界に' : ''}転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。${r.titles?.length ? `称号: ${r.titles.map(t => t.name).join('・')}` : ''}`);
   } }, '転生する ▶');
   const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(shareText(score, sum), copyBtn) }, '結果をコピー');
   openModal(`第${state.life.n}生、享年 ${sum.age} 歳`, body, [copyBtn, go], { noClose: true, wide: true });
@@ -667,17 +679,40 @@ function openHall() {
     el('div', {}, el('span', { class: 'eyebrow' }, '持ち越しスキル'), el('span', { class: 'v num', style: 'font-size:13px' }, SKILLS.map(s => `${s.name}${level(meta.skills[s.id] || 0)}`).join(' ')))));
   const titles = ensureTitles(meta);
   body.append(el('div', { class: 'eyebrow', style: 'margin-bottom:4px' }, `称号 ${titles.length}`), el('div', { class: 'titles', style: 'margin-bottom:12px' }, titles.length ? titles.map(t => el('span', { class: 'title-chip', title: `${t.desc}（第${t.life}生）` }, t.name)) : el('span', { class: 'muted', style: 'font-size:12px' }, 'まだ無い。半額で買え。7 日続けろ。')));
+  const shareBtn = el('button', { class: 'btn sm gold', onclick: () => copyText(worldUrl(state.seed), shareBtn) }, `今の世界のリンクをコピー（seed ${state.seed}）`);
+  body.append(el('div', { style: 'margin-bottom:12px' }, shareBtn, el('span', { class: 'hint', style: 'margin-left:8px' }, '同じ世界を友人に渡して、同じ暴落を別の選択で生きてもらう。')));
   if (!meta.hallOfFame.length) body.append(el('p', { class: 'list-empty' }, 'まだ誰もいない。最初の人生を生き切れ。'));
   else {
     const t = el('table', { class: 'table' });
-    t.append(el('thead', {}, el('tr', {}, ...['生', '享年', 'スコア', '純資産', '死因', '遺言'].map(h => el('th', {}, h)))));
+    t.append(el('thead', {}, el('tr', {}, ...['生', '享年', 'スコア', '純資産', '死因', '遺言', '世界'].map(h => el('th', {}, h)))));
     const tb = el('tbody');
-    for (const h of meta.hallOfFame) tb.append(el('tr', {}, el('td', { class: 'num' }, `第${h.life}生`), el('td', { class: 'num' }, h.age), el('td', { class: 'num gold' }, h.score), el('td', { class: 'num' }, fmt(h.netWorth)), el('td', {}, ({ natural: '天寿', illness: '病', bankrupt: '破産', voluntary: '自主' })[h.cause] || ''), el('td', { class: 'ep' }, h.epitaph)));
+    for (const h of meta.hallOfFame) tb.append(el('tr', {}, el('td', { class: 'num' }, `第${h.life}生`), el('td', { class: 'num' }, h.age), el('td', { class: 'num gold' }, h.score), el('td', { class: 'num' }, fmt(h.netWorth)), el('td', {}, ({ natural: '天寿', illness: '病', bankrupt: '破産', voluntary: '自主' })[h.cause] || ''), el('td', { class: 'ep' }, h.epitaph),
+      el('td', {}, el('button', { class: 'btn sm ghost', title: `seed ${h.seed}`, onclick: () => replayWorld(h.seed) }, 'もう一度'))));
     t.append(tb);
     body.append(el('div', { class: 'table-wrap' }, t));
   }
   openModal('殿堂', body, [], { wide: true });
 }
+
+/** 殿堂の世界をもう一度: 生きていれば自主転生扱い（胆力 +100）で、その seed の世界に生まれ直す */
+function replayWorld(seed) {
+  if (!Number.isFinite(seed)) return;
+  const go = () => {
+    if (state.life.alive) game.endLife(state, 'voluntary');
+    const r = game.reincarnate(state, meta, { skillForBrag: 'guts', seed });
+    meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.result = null; ui.selected = null; ui.deep = {}; ui.mcKey = '';
+    closeModal(); render(); game.saveRun(state); play('reborn');
+    toast('epic', `第${state.life.n}生`, `seed ${seed} の世界に生まれ直した。前回と同じ暴落が、同じ年に来る。`);
+  };
+  if (!state.life.alive) return go();
+  const foot = ui.modal?.querySelector('.modal-foot');
+  if (!foot) return go();
+  foot.innerHTML = '';
+  foot.append(el('span', { class: 'confirm' }, el('span', { class: 'q' }, `今の第${state.life.n}生（${state.life.age}歳）を終えて seed ${seed} の世界へ。胆力 +100。`),
+    el('button', { class: 'btn danger sm', onclick: go }, '転生する'), el('button', { class: 'btn sm ghost', onclick: openHall }, 'やめる')));
+}
+
+function worldUrl(seed) { const u = new URL(location.href); u.search = `?seed=${seed}&new=1`; return u.href; }
 
 // ───────────────────────── 遊び方 ─────────────────────────
 function openHelp(first) {

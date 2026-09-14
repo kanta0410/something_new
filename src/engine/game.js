@@ -9,6 +9,7 @@ import { readBook } from './books.js';
 import { computeScore, epitaph, lifeSummary } from './score.js';
 import { advise } from './council.js';
 import { unlockLevel } from './quant.js';
+import { trackPeaks, awardLifeTitles, ensureTitles } from './titles.js';
 
 export const META_KEY = 'isekai-quant:meta';
 export const RUN_KEY = 'isekai-quant:run';
@@ -33,6 +34,7 @@ export function defaultMeta() {
     hallOfFame: [],
     bestScore: 0,
     tutorialDone: false,
+    titles: [],
   };
 }
 
@@ -343,7 +345,7 @@ export function endYear(state, rawDecisions) {
   m.networkTotal += m.network;
   if (state.flags.fired) state.flags.yearsFired++;
   state.flags.lastCrash = !!yr.crash;
-  state.flags.peakNetWorth = Math.max(state.flags.peakNetWorth || 0, netWorth(state));
+  trackPeaks(state, report.offers.filter(o => o.accepted).map(o => o.bidRatio));
 
   let death = null;
   if (report.bankrupt) death = 'bankrupt';
@@ -398,6 +400,8 @@ export function reincarnate(state, meta, choice = {}) {
   if (state.life.alive) endLife(state, 'voluntary');
   const score = computeScore(state);
   const summary = lifeSummary(state, score);
+  ensureTitles(m);
+  const titles = awardLifeTitles(m, state, score);
   for (const id of SKILL_IDS) m.skills[id] = Math.max(m.skills[id], Math.floor(state.skills[id]?.xp ?? 0));
   const bragSkill = SKILL_IDS.includes(choice.skillForBrag) ? choice.skillForBrag : 'guts';
   const bonus = (state.brag.points || 0) * 30;
@@ -407,6 +411,7 @@ export function reincarnate(state, meta, choice = {}) {
   m.hallOfFame.push({
     life: state.life.n, age: state.life.age, score: score.total, netWorth: netWorth(state),
     epitaph: state.life.epitaph, cause: state.life.deathCause, seed: state.seed, year: state.life.year,
+    titles: titles.map(t => t.name),
     breakdown: { wealth: score.wealth, fun: score.fun, learning: score.learning, network: score.network, brag: score.brag },
   });
   m.hallOfFame.sort((a, b) => b.score - a.score);
@@ -416,7 +421,7 @@ export function reincarnate(state, meta, choice = {}) {
   saveMeta(m);
   clearRun();
   const next = newGame(m);
-  return { meta: m, state: next, score, summary, bragBonus: bonus, bragSkill };
+  return { meta: m, state: next, score, summary, bragBonus: bonus, bragSkill, titles };
 }
 
 export function serialize(state) { return JSON.stringify(state); }

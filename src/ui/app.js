@@ -11,6 +11,7 @@ import { fitCanvas, drawNetWorth, drawMarket, drawFan, drawSparkline, drawRadar 
 import { drawCity, districtAt } from './cityView.js';
 import { REAL_ACTIONS, recordRealAction, doneToday, currentStreak, ensureDaily, recentDays, ledgerText, todayKey } from '../engine/real.js';
 import { play, setSoundEnabled } from './sound.js';
+import { previewLifeTitles, awardStreakTitles, ensureTitles } from '../engine/titles.js';
 
 const fmt = game.formatMoney;
 const $ = (id) => document.getElementById(id);
@@ -625,6 +626,8 @@ function openReborn() {
   for (const [l, v, c] of [['富', score.wealth], ['楽', score.fun], ['学', score.learning], ['縁', score.network], ['自慢', score.brag], ['総合', score.total, 'tot']]) row.append(el('div', { class: c || '' }, el('div', { class: 'l' }, l), el('div', { class: 'v num' }, v)));
   right.append(row);
   body.append(grid, el('div', { class: 'epitaph' }, state.life.epitaph || '—'));
+  const newTitles = previewLifeTitles(meta, state, score);
+  if (newTitles.length) body.append(el('div', { class: 'titles' }, el('span', { class: 'eyebrow' }, '新しい称号'), ...newTitles.map(t => el('span', { class: 'title-chip', title: t.desc }, t.name))));
   // 失敗を自慢する
   const failures = state.brag.failures || [];
   const list = el('ul', { class: 'failures' });
@@ -642,7 +645,7 @@ function openReborn() {
     const r = game.reincarnate(state, meta, { skillForBrag: chosen });
     meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.selected = null; ui.deep = {}; ui.mcKey = '';
     closeModal(); render(); game.saveRun(state); play('reborn');
-    toast('epic', `第${state.life.n}生`, `転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。`);
+    toast('epic', `第${state.life.n}生`, `転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。${r.titles?.length ? `称号: ${r.titles.map(t => t.name).join('・')}` : ''}`);
   } }, '転生する ▶');
   const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(shareText(score, sum), copyBtn) }, '結果をコピー');
   openModal(`第${state.life.n}生、享年 ${sum.age} 歳`, body, [copyBtn, go], { noClose: true, wide: true });
@@ -662,6 +665,8 @@ function openHall() {
     el('div', {}, el('span', { class: 'eyebrow' }, '最高スコア'), el('span', { class: 'v num gold' }, meta.bestScore)),
     el('div', {}, el('span', { class: 'eyebrow' }, '自慢ポイント累計'), el('span', { class: 'v num' }, meta.bragPoints)),
     el('div', {}, el('span', { class: 'eyebrow' }, '持ち越しスキル'), el('span', { class: 'v num', style: 'font-size:13px' }, SKILLS.map(s => `${s.name}${level(meta.skills[s.id] || 0)}`).join(' ')))));
+  const titles = ensureTitles(meta);
+  body.append(el('div', { class: 'eyebrow', style: 'margin-bottom:4px' }, `称号 ${titles.length}`), el('div', { class: 'titles', style: 'margin-bottom:12px' }, titles.length ? titles.map(t => el('span', { class: 'title-chip', title: `${t.desc}（第${t.life}生）` }, t.name)) : el('span', { class: 'muted', style: 'font-size:12px' }, 'まだ無い。半額で買え。7 日続けろ。')));
   if (!meta.hallOfFame.length) body.append(el('p', { class: 'list-empty' }, 'まだ誰もいない。最初の人生を生き切れ。'));
   else {
     const t = el('table', { class: 'table' });
@@ -836,6 +841,8 @@ function onRealAction(a) {
   play('check');
   toast('good', a.short, a.effect);
   if (r.combo) { toast('epic', 'フルコンボ', 'エネルギー +20。今日は勝ちだ。'); play('win'); }
+  const st = awardStreakTitles(meta, r.streak, state.life.n);
+  if (st.length) { game.saveMeta(meta); for (const t of st) toast('epic', `称号「${t.name}」`, t.desc); }
   if (r.milestone) streakFlash(r.milestone);
   else if (r.streak > 1 && doneToday(meta).length === 1) toast('epic', `連続 ${r.streak} 日`, '続けた者が勝つ。');
   renderHeader(); renderDaily();
@@ -875,6 +882,7 @@ function shareText(score, sum) {
   return [`転生クオンツ 第${state.life.n}生｜享年 ${sum.age}歳（${cause}）｜純資産 ${fmt(sum.netWorth)}`,
     `スコア ${score.total}（富 ${score.wealth} 楽 ${score.fun} 学 ${score.learning} 縁 ${score.network} 自慢 ${score.brag}）`,
     `買い付け ${sum.offersMade} 本／成立 ${sum.offersAccepted}｜アラモ ${sum.alamoCount} 回｜遺言「${state.life.epitaph || ''}」`,
+    `称号 ${[...ensureTitles(meta).map(t => t.name), ...previewLifeTitles(meta, state, score).map(t => t.name)].join('・') || 'なし'}`,
     `現実の連続行動 ${currentStreak(meta)} 日｜seed ${state.seed}`].join('\n');
 }
 

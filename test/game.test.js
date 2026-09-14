@@ -84,3 +84,25 @@ test('voluntary reincarnation grants guts xp', () => {
   endLife(s, 'voluntary');
   assert.equal(s.skills.guts.xp - before >= 100, true);
 });
+
+test('same seed gives the same market and city regardless of decisions (same world)', () => {
+  const a = newGame(defaultMeta(), 777), b = newGame(defaultMeta(), 777);
+  for (let i = 0; i < 25; i++) {
+    endYear(a, { ...defaultDecisions(a), time: { reading: 100, scouting: 0, networking: 0, fun: 0, hustle: 0 }, stockAlloc: 0 });
+    const d = defaultDecisions(b); d.time = { reading: 0, scouting: 50, networking: 50, fun: 0, hustle: 0 }; d.stockAlloc = 1; d.scoutTargets = [1, 2, 3];
+    const ls = b.city.listings.slice(0, 3); d.offers = ls.map(l => ({ listingId: l.id, bidRatio: 0.9, ltv: 0.7 }));
+    endYear(b, d);
+  }
+  assert.deepEqual(a.market.series.index, b.market.series.index);
+  assert.deepEqual(a.city.districts.map(x => x.value), b.city.districts.map(x => x.value));
+  assert.deepEqual(a.city.listings.map(x => x.ask), b.city.listings.map(x => x.ask));
+  assert.notDeepEqual(a.history.map(h => h.netWorth), b.history.map(h => h.netWorth));
+});
+
+test('reincarnate with sameWorld reuses the seed', () => {
+  const meta = defaultMeta(); const s = newGame(meta, 4242);
+  endYear(s, defaultDecisions(s)); endLife(s, 'voluntary');
+  const r = reincarnate(s, meta, { skillForBrag: 'guts', sameWorld: true });
+  assert.equal(r.state.seed, 4242);
+  assert.deepEqual(r.state.city.districts.map(x => x.name), s.city.districts.map(x => x.name));
+});

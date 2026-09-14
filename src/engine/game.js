@@ -64,15 +64,19 @@ export function saveMeta(meta) {
 export function newGame(meta, seed) {
   const m = meta || defaultMeta();
   const finalSeed = (seed ?? hashSeed(`${Date.now()}:${m.lives}:${Math.floor(Math.random() * 1e9)}`)) >>> 0;
-  const rng = createRng(finalSeed);
-  const market = createMarket(rng);
-  const city = createCity(rng);
+  // 乱数は 3 本に分ける: 市場と街はプレイヤーの選択に影響されない「世界」、人生（買い付け・偵察・イベント・死）は選択次第。
+  // 同じ seed なら同じ市場・同じ街が再現されるので「同じ世界で転生」ができる。
+  const rm = createRng((finalSeed ^ 0x51ed270b) >>> 0);
+  const rc = createRng((finalSeed ^ 0x2545f491) >>> 0);
+  const rl = createRng(finalSeed);
+  const market = createMarket(rm);
+  const city = createCity(rc);
   const skills = {};
   for (const id of SKILL_IDS) skills[id] = { xp: Math.max(0, Math.floor(m.skills?.[id] ?? 0)) };
   const state = {
     version: 1,
     seed: finalSeed,
-    rngState: rng.state(),
+    rngStates: { market: rm.state(), city: rc.state(), life: rl.state() },
     life: { n: m.lives + 1, age: START_AGE, year: START_YEAR, alive: true, deathCause: null, epitaph: null },
     money: { cash: 300, stocks: 0, debt: 0 },
     props: [],
@@ -160,7 +164,8 @@ function record(state, yr, income) {
 export function endYear(state, rawDecisions) {
   if (!state.life.alive) throw new Error('already dead');
   const d = normalizeDecisions(rawDecisions);
-  const rng = rngFromState(state.rngState);
+  const { rm, rc, rl } = streams(state);
+  const rng = rl;
   const lv = skillLevels(state);
   const report = { yearResult: null, income: null, events: [], offers: [], cityEvents: [], death: null, bankrupt: false, advice: [], careerEvents: [], scoutFinds: [], books: [], sells: [] };
   const nwStart = netWorth(state);
@@ -267,14 +272,14 @@ export function endYear(state, rawDecisions) {
   }
 
   // 7. 市場
-  const yr = stepYear(state.market, rng);
+  const yr = stepYear(state.market, rm);
   report.yearResult = yr;
   state.money.stocks *= (1 + yr.totalReturn);
   if (state.money.cash > 0) state.money.cash *= (1 + yr.depositRate);
   if (state.money.stocks > 0) addXp(state, 'quant', 8);
 
   // 8. 街と物件
-  const cityRes = stepCity(state.city, { marketReturn: yr.totalReturn, crash: yr.crash, year: state.life.year + 1 }, rng);
+  const cityRes = stepCity(state.city, { marketReturn: yr.totalReturn, crash: yr.crash, year: state.life.year + 1 }, rc);
   report.cityEvents = cityRes.events || [];
   let rentTotal = 0, cfTotal = 0;
   for (const p of state.props) {
@@ -357,7 +362,7 @@ export function endYear(state, rawDecisions) {
   const hist = record(state, yr, inc.net + inc.hustle + inc.pension);
   state.history.push(hist);
   state.policy = { ...d, offers: [], sells: [], books: [], quitJob: false };
-  state.rngState = rng.state();
+  state.rngStates = { market: rm.state(), city: rc.state(), life: rl.state() };
 
   if (death) {
     endLife(state, death);
@@ -365,6 +370,14 @@ export function endYear(state, rawDecisions) {
   }
   report.advice = safeAdvise(state, yr);
   return report;
+}
+
+/** 保存された乱数状態から 3 本のストリームを復元。旧セーブ（rngState のみ）は 1 本を 3 つに複製して続行する。 */
+function streams(state) {
+  if (state.rngStates) return { rm: rngFromState(state.rngStates.market), rc: rngFromState(state.rngStates.city), rl: rngFromState(state.rngStates.life) };
+  const legacy = state.rngState || [1, 0, 0];
+  const mk = () => rngFromState(legacy);
+  return { rm: mk(), rc: mk(), rl: mk() };
 }
 
 function safeAdvise(state, yr) {
@@ -420,8 +433,9 @@ export function reincarnate(state, meta, choice = {}) {
   m.tutorialDone = true;
   saveMeta(m);
   clearRun();
-  const next = newGame(m);
-  return { meta: m, state: next, score, summary, bragBonus: bonus, bragSkill, titles };
+  const seed = choice.sameWorld ? state.seed : (Number.isFinite(choice.seed) ? (choice.seed >>> 0) : undefined);
+  const next = newGame(m, seed);
+  return { meta: m, state: next, score, summary, bragBonus: bonus, bragSkill, titles, sameWorld: !!choice.sameWorld };
 }
 
 export function serialize(state) { return JSON.stringify(state); }
@@ -452,4 +466,4 @@ function fmt(v) {
   else s = Math.round(a).toLocaleString('ja-JP') + '万';
   return (neg ? '−' : '') + s;
 }
-export { fmt as formatMoney, SKILLS, level, SKILL_IDS };
+export { fmt as formatMoney, SKILLS, level, SKILL_IDS, hashSeed };

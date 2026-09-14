@@ -9,7 +9,7 @@ import { computeScore, lifeSummary } from '../engine/score.js';
 import { netWorth } from '../engine/life.js';
 import { fitCanvas, drawNetWorth, drawMarket, drawFan, drawSparkline, drawRadar } from './charts.js';
 import { drawCity, districtAt } from './cityView.js';
-import { REAL_ACTIONS, recordRealAction, doneToday, currentStreak, ensureDaily, recentDays, ledgerText, todayKey } from '../engine/real.js';
+import { REAL_ACTIONS, recordRealAction, doneToday, currentStreak, ensureDaily, recentDays, ledgerText, todayKey, questFor, setNote, getNote, recentNotes } from '../engine/real.js';
 import { play, setSoundEnabled } from './sound.js';
 import { previewLifeTitles, awardStreakTitles, ensureTitles } from '../engine/titles.js';
 
@@ -762,11 +762,18 @@ function renderDaily() {
   // 今日の現実
   const real = $('d-real'); real.innerHTML = '';
   real.append(el('h2', {}, '今日の現実', el('span', { class: 'cnt num' }, `${done.length} / ${REAL_ACTIONS.length}`), el('span', { class: 'eyebrow' }, 'Real world')));
+  const quest = questFor(today);
+  real.append(el('div', { class: 'quest' + (done.includes(quest.action) ? ' done' : '') }, el('span', { class: 'eyebrow' }, '今日のクエスト'), el('span', { class: 'qt' }, quest.text)));
   for (const a of REAL_ACTIONS) {
     const isDone = done.includes(a.id);
-    real.append(el('button', { class: 'real-row' + (isDone ? ' done' : ''), disabled: isDone ? 'true' : null, onclick: () => onRealAction(a) },
+    real.append(el('button', { class: 'real-row' + (isDone ? ' done' : '') + (a.id === quest.action && !isDone ? ' quest-target' : ''), disabled: isDone ? 'true' : null, onclick: () => onRealAction(a) },
       el('span', { class: 'box' }, isDone ? '✓' : ''), el('span', { class: 'lbl' }, a.label), el('span', { class: 'eff' }, a.effect)));
   }
+  const note = el('input', { type: 'text', class: 'note', maxlength: 200, placeholder: '今日の言語化を 1 行（「それをやると何が得か」）', value: getNote(meta, today) });
+  const saveNote = () => { const v = setNote(meta, note.value, today); game.saveMeta(meta); if (v) note.classList.add('saved'); else note.classList.remove('saved'); };
+  note.addEventListener('change', saveNote); note.addEventListener('keydown', (e) => { if (e.key === 'Enter') { saveNote(); note.blur(); } });
+  if (getNote(meta, today)) note.classList.add('saved');
+  real.append(note);
   real.append(el('p', { class: 'hint', style: 'margin-top:8px' }, done.length === REAL_ACTIONS.length ? 'フルコンボ。エネルギー +20。今日は勝ちだ。' : '押した瞬間にゲームへ反映される。1 日 1 回ずつ。6 つ全部でエネルギー +20。嘘をつくと自分が損をするだけ。'));
   // 今年の方針
   const plan = $('d-plan'); plan.innerHTML = '';
@@ -872,6 +879,8 @@ function openLedger() {
   const tb = el('tbody');
   for (const a of REAL_ACTIONS) tb.append(el('tr', {}, el('td', {}, a.label), el('td', { class: 'num' }, d.totals[a.id] || 0), el('td', { class: 'muted' }, a.effect)));
   t.append(tb); body.append(el('div', { class: 'table-wrap' }, t));
+  const notes = recentNotes(meta, 14, today);
+  if (notes.length) { body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, '言語化メモ（直近 14 日）')); const nl = el('ul', { class: 'notes' }); for (const n of notes) nl.append(el('li', {}, el('span', { class: 'num muted' }, n.date), ' ', n.text)); body.append(nl); }
   body.append(el('p', { class: 'hint', style: 'margin-top:10px' }, 'これが実社会での検証記録。買い付けの本数、現地を見た回数、与えた回数。数字が出ていない価値観は、まだ行動になっていない。'));
   const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(ledgerText(meta, today), copyBtn) }, '台帳をコピー');
   openModal('実績台帳', body, [copyBtn], { wide: true });

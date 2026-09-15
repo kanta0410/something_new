@@ -1,0 +1,17 @@
+{
+  "name": "転生クオンツ",
+  "short_name": "転生クオンツ",
+  "description": "毎日開いて現実の行動をタップし、1年進める。死んでもスキルを持って転生する人生シミュレーター。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E1A2B",
+  "theme_color": "#0E1A2B",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -22,6 +22,7 @@ async function drive(page, tag) {
   await page.screenshot({ path: path.join(outDir, `daily-${tag}-2.png`), fullPage: tag === 'mobile' });
   await page.locator('#d-result .btn.primary').click(); await page.waitForTimeout(1800);
   await page.screenshot({ path: path.join(outDir, `daily-${tag}-3.png`), fullPage: tag === 'mobile' });
+  await page.locator('#btn-menu').click(); await page.waitForTimeout(250); await page.screenshot({ path: path.join(outDir, `daily-${tag}-menu.png`) }); await page.keyboard.press('Escape'); await page.waitForTimeout(150);
   await page.locator('#btn-ledger').click(); await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(outDir, `daily-${tag}-ledger.png`) });
   await page.keyboard.press('Escape');

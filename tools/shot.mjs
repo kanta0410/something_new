@@ -21,7 +21,7 @@ try {
   if (await page.locator('#boot-go').count() && await page.locator('#boot-go').isVisible()) { await page.click('#boot-go'); await page.waitForTimeout(200); }
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
-  await page.click('#btn-mode'); await page.waitForTimeout(400);
+  await page.click('#btn-menu'); await page.waitForTimeout(200); await page.locator('.menu-item', { hasText: '端末' }).first().click(); await page.waitForTimeout(400);
   await page.screenshot({ path: path.join(outDir, 'app.png') });
   for (let i = 0; i < 5; i++) { await page.click('#btn-end'); await page.waitForTimeout(1500); }
   await page.waitForTimeout(400);

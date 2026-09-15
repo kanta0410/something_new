@@ -49,7 +49,7 @@ try {
   if (life2.n !== 2 || life2.hall !== 1) throw new Error('reincarnation state wrong');
   for (let i = 0; i < 5; i++) { await page.click('#btn-end'); await page.waitForTimeout(250); if (await page.locator('.alamo').count()) await page.waitForTimeout(1200); }
   // フル画面へ切り替えて描画確認
-  await page.click('#btn-mode'); await page.waitForTimeout(600);
+  await page.click('#btn-menu'); await page.waitForTimeout(200); await page.locator('.menu-item', { hasText: '端末' }).first().click(); await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(root, 'shots', 'playtest-life2-full.png') });
   await page.click('#btn-hall'); await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(root, 'shots', 'playtest-hall.png') });

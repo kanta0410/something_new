@@ -106,6 +106,7 @@ function buildStaticControls() {
   $('btn-city').addEventListener('click', () => { if (ui.mode !== 'full') setMode('full'); $('panel-city').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); });
   $('btn-mode').addEventListener('click', () => setMode(ui.mode === 'full' ? 'daily' : 'full'));
   $('btn-ledger').addEventListener('click', openLedger);
+  $('btn-menu').addEventListener('click', openMenu);
   $('btn-sound').addEventListener('click', () => { meta.sound = meta.sound === false; setSoundEnabled(meta.sound !== false); game.saveMeta(meta); renderSoundBtn(); if (meta.sound !== false) play('check'); });
   $('btn-books').addEventListener('click', openBooks);
   $('btn-hall').addEventListener('click', openHall);
@@ -150,11 +151,17 @@ function render() {
   renderSoundBtn();
   $('daily').hidden = ui.mode !== 'daily';
   $('full').hidden = ui.mode !== 'full';
+  const daily = ui.mode === 'daily';
+  document.body.classList.toggle('mode-daily', daily);
   $('btn-mode').textContent = ui.mode === 'full' ? '毎日' : '端末';
-  $('btn-mode').hidden = st < 2;
-  $('btn-books').hidden = st < 1;
-  $('btn-hall').hidden = st < 1;
-  $('btn-city').hidden = ui.mode !== 'full';
+  $('btn-mode').hidden = daily || st < 2;
+  $('btn-books').hidden = daily || st < 1;
+  $('btn-hall').hidden = daily || st < 1;
+  $('btn-help').hidden = daily;
+  $('btn-sound').hidden = daily;
+  $('btn-city').hidden = daily;
+  $('btn-menu').hidden = !daily;
+  $('reborn-wrap').hidden = daily;
   checkStageUnlock(st);
   $('books-count').textContent = decisions.books.length ? `(${decisions.books.length})` : '';
   if (ui.mode === 'full') {
@@ -856,96 +863,109 @@ function renderDaily() {
   const streak = currentStreak(meta, today);
   const done = doneToday(meta, today);
   const st = game.status(state);
-  // 上段
-  const top = $('d-top'); top.innerHTML = '';
   const stg = stageOf();
-  top.append(el('span', { class: 'streak num' }, `同期 ${streak} 日`, el('small', {}, `外界で連続して動いた日${ensureDaily(meta).bestStreak > streak ? `（最長 ${ensureDaily(meta).bestStreak}）` : ''}`)),
-    el('span', { class: 'num' }, `転生者 #${st.life} · 世界 #${state.seed} · ${st.age}歳 · ${fmt(st.netWorth)}`),
-    el('span', { class: 'stage-chip' }, `回廊 Lv${stg}`),
+  // 上段: 同期日数と世界線
+  const top = $('d-top'); top.innerHTML = '';
+  top.append(el('span', { class: 'streak num' }, `同期 ${streak} 日`, el('small', {}, streak === 0 ? '今日、外界で動いたらここが伸びる' : `外界で連続して動いた日${ensureDaily(meta).bestStreak > streak ? `（最長 ${ensureDaily(meta).bestStreak}）` : ''}`)),
     el('span', { class: 'today num' }, today));
-  // 今日の現実
+  const life = el('div', { class: 'lifeline', title: `${st.age}歳。100 歳で強制終了。` },
+    el('span', { class: 'l num' }, '22'), el('div', { class: 'track' }, el('i', { style: `width:${Math.max(0, Math.min(100, (st.age - 22) / 78 * 100))}%` }), el('b', { style: `left:${Math.max(0, Math.min(100, (st.age - 22) / 78 * 100))}%` })), el('span', { class: 'r num' }, '100'),
+    el('span', { class: 'meta num' }, `転生者 #${st.life} · ${fmt(st.netWorth)} · `, el('span', { class: 'stage-chip' }, `回廊 Lv${stg}`)));
+  top.append(life);
+
+  // 1. 外界同期
   const real = $('d-real'); real.innerHTML = '';
-  real.append(el('h2', {}, '外界同期', el('span', { class: 'sub-t' }, '今日、現実でやったこと'), el('span', { class: 'cnt num' }, `${done.length} / ${REAL_ACTIONS.length}`), el('span', { class: 'eyebrow' }, 'Outer sync')));
+  real.append(el('h2', {}, el('span', { class: 'step num' }, '1'), '外界同期', el('span', { class: 'sub-t' }, '今日、現実でやったこと'), el('span', { class: 'cnt num' }, `${done.length}/${REAL_ACTIONS.length}`)));
   const quest = questFor(today);
   real.append(el('div', { class: 'quest' + (done.includes(quest.action) ? ' done' : '') }, el('span', { class: 'eyebrow' }, '今日のクエスト'), el('span', { class: 'qt' }, quest.text)));
-  for (const a of REAL_ACTIONS) {
-    const isDone = done.includes(a.id);
-    real.append(el('button', { class: 'real-row' + (isDone ? ' done' : '') + (a.id === quest.action && !isDone ? ' quest-target' : ''), disabled: isDone ? 'true' : null, onclick: () => onRealAction(a) },
-      el('span', { class: 'box' }, isDone ? '✓' : ''), el('span', { class: 'lbl' }, a.label), el('span', { class: 'eff' }, a.effect)));
+  for (const act of REAL_ACTIONS) {
+    const isDone = done.includes(act.id);
+    real.append(el('button', { class: 'real-row' + (isDone ? ' done' : '') + (act.id === quest.action && !isDone ? ' quest-target' : ''), disabled: isDone ? 'true' : null, onclick: () => onRealAction(act) },
+      el('span', { class: 'box' }, isDone ? '✓' : ''), el('span', { class: 'lbl' }, act.label), el('span', { class: 'eff' }, act.effect.split('、')[0])));
   }
-  const note = el('input', { type: 'text', class: 'note', maxlength: 200, placeholder: '今日の言語化を 1 行（「それをやると何が得か」）', value: getNote(meta, today) });
-  const saveNote = () => { const v = setNote(meta, note.value, today); game.saveMeta(meta); if (v) note.classList.add('saved'); else note.classList.remove('saved'); };
+  const noteWrap = el('div', { class: 'note-wrap' });
+  const noteVal = getNote(meta, today);
+  const note = el('input', { type: 'text', class: 'note', maxlength: 200, placeholder: '「それをやると何が得か」を 1 行', value: noteVal });
+  const saveNote = () => { const v = setNote(meta, note.value, today); game.saveMeta(meta); note.classList.toggle('saved', !!v); };
   note.addEventListener('change', saveNote); note.addEventListener('keydown', (e) => { if (e.key === 'Enter') { saveNote(); note.blur(); } });
-  if (getNote(meta, today)) note.classList.add('saved');
-  real.append(note);
-  real.append(el('p', { class: 'hint', style: 'margin-top:8px' }, done.length === REAL_ACTIONS.length ? 'フルコンボ。エネルギー +20。今日は勝ちだ。' : '押した瞬間に回廊の中のあなたへ反映される。1 日 1 回ずつ。6 つ全部でエネルギー +20。嘘をつくと損をするのは自分。'));
-  // 今年の方針
+  if (noteVal) note.classList.add('saved');
+  const noteToggle = el('button', { class: 'btn sm ghost', onclick: () => { noteWrap.classList.toggle('open'); if (noteWrap.classList.contains('open')) note.focus(); } }, noteVal ? '言語化メモ ✓' : '言語化メモ ＋');
+  noteWrap.append(noteToggle, note);
+  if (noteVal) noteWrap.classList.add('open');
+  real.append(noteWrap);
+
+  // 2. 航路
   const plan = $('d-plan'); plan.innerHTML = '';
-  plan.append(el('h2', {}, '今年の航路', el('span', { class: 'sub-t' }, '時間と金の配分'), el('span', { class: 'cnt num' }, `${state.life.year}年`), el('span', { class: 'eyebrow' }, 'Course')));
-  const grid = el('div', { class: 'presets' });
+  plan.append(el('h2', {}, el('span', { class: 'step num' }, '2'), '今年の航路', el('span', { class: 'sub-t' }, `${state.life.year}年 · ${st.age}歳`)));
   const visible = Object.entries(PRESETS).filter(([id]) => stg >= 1 || id === 'guard' || id === 'attack');
   if (stg < 1 && !['guard', 'attack'].includes(ui.preset) && ui.preset !== 'custom') applyPreset('guard', true);
-  for (const [id, p] of visible) grid.append(el('button', { class: 'preset' + (ui.preset === id ? ' on' : ''), onclick: () => applyPreset(id) }, el('b', {}, p.name), el('span', {}, p.desc)));
-  plan.append(grid);
-  if (stg < 1) plan.append(el('div', { class: 'lock-note' }, el('b', {}, '回廊 Lv1'), '学ぶ／遊ぶ、本棚、転生記録が開く。転生 1 回、または外界同期 7 日。'));
-  const counts = { 0.7: quickOffersFor(0.7).length, 0.5: quickOffersFor(0.5).length };
-  if (ui.quick && counts[ui.quickRatio] === 0 && counts[0.5] > 0 && ui.quickRatio !== 0.5) ui.quickRatio = 0.5; // 70% で届かなければ半額で出す
-  const seg = el('span', { class: 'seg' }, ...[0.7, 0.5].map(r => el('button', { 'aria-pressed': ui.quickRatio === r ? 'true' : 'false', onclick: () => { ui.quickRatio = r; renderDaily(); } }, `${Math.round(r * 100)}%（${counts[r]}）`)));
+  const seg = el('div', { class: 'course' });
+  for (const [id, p] of visible) seg.append(el('button', { class: 'preset' + (ui.preset === id ? ' on' : ''), onclick: () => applyPreset(id) }, p.name));
+  plan.append(seg);
+  const cur = PRESETS[ui.preset];
   const qo = ui.quick ? quickOffersFor(ui.quickRatio) : [];
-  plan.append(el('div', { class: 'quick' },
-    el('button', { class: 'btn sm ' + (ui.quick ? 'on' : ''), onclick: () => { ui.quick = !ui.quick; if (ui.preset !== 'custom' && !!PRESETS[ui.preset]?.quick !== ui.quick) customized(); renderDaily(); } }, ui.quick ? `安い売り物 ${qo.length} 本に買い付けを出す` : '安い売り物 3 本に買い付けを出す'),
-    seg,
-    el('span', { class: 'hint' }, ui.quick ? (qo.length ? `${Math.round(ui.quickRatio * 100)}% で届く売り物が ${qo.length} 件。半額でも常識外でもいい。却下されても学びと自慢になる。` : '今の現金では半額でも届かない。数年貯めるか、フル画面で株を取り崩す。') : '「行動すると事態が動く」を 1 タップで。'),
-    stg >= 2 ? el('button', { class: 'btn sm ghost', onclick: () => setMode('full') }, '端末で細かく') : el('span', { class: 'hint' }, '回廊 Lv2 で端末（街の地図・クオンツ）が開く')));
-  const t = decisions.time;
-  plan.append(el('p', { class: 'hint', style: 'margin-top:8px' }, `時間: 読書 ${Math.round(t.reading)} · 偵察 ${Math.round(t.scouting)} · 人脈 ${Math.round(t.networking)} · 遊ぶ ${Math.round(t.fun)} · 副業 ${Math.round(t.hustle)} ／ 貯蓄率 ${Math.round(decisions.savingsRate * 100)}% ／ 株式 ${Math.round(decisions.stockAlloc * 100)}%${decisions.books.length ? ` ／ 本 ${decisions.books.length} 冊` : ''}${ui.preset === 'custom' ? ' ／ 手動調整あり' : ''}`));
-  // 賢人
-  const council = $('d-council'); council.innerHTML = '';
-  const advs = currentAdvice();
-  const dayIdx = ((dayIndex(today) + state.life.year) % ADVISORS.length + ADVISORS.length) % ADVISORS.length;
-  const show = ui.showAll ? ADVISORS : [ADVISORS[dayIdx]];
-  council.append(el('h2', {}, ui.showAll ? '残響（3 人）' : '残響', el('span', { class: 'sub-t' }, '賢人たちの声'), el('span', { class: 'eyebrow' }, 'Echoes')));
-  for (const a of show) {
-    const adv = advs.find(x => x.id === a.id) || { text: '…' };
-    const row = el('div', { class: 'd-council' }, el('div', { class: 'mono-circle', style: `background:${a.color}` }, a.initial),
-      el('div', {}, el('div', { class: 'who' }, el('span', { class: 'nm' }, a.name), adv.focus ? el('span', { class: 'focus' }, adv.focus) : null), el('div', { class: 'speech' }, adv.text)));
-    const deep = ui.deep[a.id];
-    if (deep) row.lastChild.append(el('div', { class: `speech ${deep.err ? 'err' : 'deep'}` }, deep.text));
-    if (ui.sample) row.lastChild.append(el('button', { class: 'btn sm ghost', style: 'margin-top:6px', onclick: () => askDeep(a.id) }, deep?.loading ? '考え中…' : 'Claude に深く聞く'));
-    council.append(row);
-  }
-  council.append(el('button', { class: 'btn sm ghost', style: 'margin-top:8px', onclick: () => { ui.showAll = !ui.showAll; renderDaily(); } }, ui.showAll ? '一人だけにする' : '3 人とも聞く'));
-  // 下部の副操作（モバイルではバーから隠れる分）
-  const foot = $('d-foot'); foot.innerHTML = '';
-  if (stg >= 1) foot.append(el('button', { class: 'btn sm', onclick: openBooks }, `本棚${decisions.books.length ? ` (${decisions.books.length})` : ''}`),
-    el('button', { class: 'btn sm', onclick: openHall }, '転生記録'));
-  foot.append(el('button', { class: 'btn sm', onclick: () => openHelp(false) }, 'この世界'),
-    el('button', { class: 'btn sm ghost', onclick: () => $('btn-sound').click() }, meta.sound === false ? '音 OFF' : '音 ON'),
-    el('button', { class: 'btn sm danger', onclick: () => { confirmReborn(); $('reborn-wrap').scrollIntoView({ block: 'nearest' }); } }, '転生する'));
-  // 結果
-  const res = $('d-result');
+  if (ui.quick && qo.length === 0 && ui.quickRatio !== 0.5 && quickOffersFor(0.5).length) ui.quickRatio = 0.5;
+  const line = ui.preset === 'custom' ? '端末で手動調整した航路。' : cur ? cur.desc : '';
+  const offerLine = ui.quick ? (qo.length ? `安い売り物 ${qo.length} 本に ${Math.round(ui.quickRatio * 100)}% で買い付けを出す。却下されても学びと自慢になる。` : '今の現金では半額でも届かない。数年貯める。') : '';
+  plan.append(el('p', { class: 'course-desc' }, line, offerLine ? el('span', { class: 'gold' }, ' ' + offerLine) : null));
+  if (stg < 1) plan.append(el('p', { class: 'hint' }, '学ぶ／遊ぶは回廊 Lv1 で開く（転生 1 回 or 同期 7 日）。'));
+  else if (stg >= 2) plan.append(el('p', { class: 'hint' }, el('button', { class: 'btn sm ghost', onclick: () => setMode('full') }, '端末で細かく決める')));
+
+  // 3. 1 年進める / 演算結果
+  const res = $('d-result'); res.hidden = false; res.innerHTML = '';
   if (ui.result && ui.result.report) {
     const { report, nwBefore, nwAfter, year } = ui.result;
     const delta = nwAfter - nwBefore;
-    res.hidden = false; res.innerHTML = '';
-    res.append(el('h2', {}, `${year}年 演算結果`, el('span', { class: 'eyebrow' }, 'Result')));
-    res.append(el('div', { class: `delta num ${delta >= 0 ? 'pos' : 'neg'}` }, `${delta >= 0 ? '+' : ''}${fmt(delta)}`, el('small', {}, `純資産 ${fmt(nwBefore)} → ${fmt(nwAfter)}`)));
-    const ul = el('ul');
     const yr = report.yearResult;
-    ul.append(el('li', {}, `市場 ${yr.totalReturn >= 0 ? '+' : ''}${(yr.totalReturn * 100).toFixed(1)}%${yr.crash ? '（アラモの時）' : ''}、金利 ${(yr.rate * 100).toFixed(2)}%`));
-    if (report.offers.length) ul.append(el('li', {}, `買い付け ${report.offers.length} 本 → 成立 ${report.offers.filter(o => o.accepted).length}。${report.offers.map(o => `${o.districtName} ${Math.round((o.bidRatio || 0) * 100)}% ${o.accepted ? '成立' : '却下'}`).join(' / ')}`));
-    if (report.income) ul.append(el('li', {}, `収入 ${fmt(report.income.net + report.income.hustle + (report.income.pension || 0))}、生活費 ${fmt(report.income.living)}、不労所得 ${fmt(report.income.passive || 0)}`));
-    for (const e of report.events.filter(e => ['epic', 'bad', 'good'].includes(e.severity)).slice(0, 3)) ul.append(el('li', { class: e.severity === 'bad' ? 'neg' : e.severity === 'epic' ? 'gold' : 'pos' }, `${e.title}: ${e.text}`));
-    for (const b of report.books || []) ul.append(el('li', { class: 'gold' }, `読了『${b.title || b.id}』${b.quote ? `「${b.quote}」` : ''}`));
-    res.append(ul);
-    res.append(el('div', { style: 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap' },
-      el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, 'もう 1 年 ▶'),
-      stg >= 2 ? el('button', { class: 'btn ghost', onclick: () => setMode('full') }, '端末で見る') : null));
+    res.append(el('h2', {}, el('span', { class: 'step num' }, '3'), `${year}年 演算結果`, el('span', { class: `chip r-${st.regime}` }, st.regime)));
+    res.append(el('div', { class: `delta num ${delta >= 0 ? 'pos' : 'neg'}` }, `${delta >= 0 ? '+' : ''}${fmt(delta)}`, el('small', {}, `純資産 ${fmt(nwAfter)} · 市場 ${yr.totalReturn >= 0 ? '+' : ''}${(yr.totalReturn * 100).toFixed(0)}%${yr.crash ? ' · アラモの時' : ''}`)));
+    const ul = el('ul');
+    if (report.offers.length) ul.append(el('li', { class: report.offers.some(o => o.accepted) ? 'gold' : '' }, `買い付け ${report.offers.length} 本 → 成立 ${report.offers.filter(o => o.accepted).length}。${report.offers.map(o => `${o.districtName} ${Math.round((o.bidRatio || 0) * 100)}% ${o.accepted ? '成立' : '却下'}`).join(' / ')}`));
+    for (const e of report.events.filter(e => ['epic', 'bad', 'good'].includes(e.severity)).slice(0, 2)) ul.append(el('li', { class: e.severity === 'bad' ? 'neg' : e.severity === 'epic' ? 'gold' : 'pos' }, `${e.title}: ${e.text}`));
+    for (const b of (report.books || []).slice(0, 1)) ul.append(el('li', { class: 'gold' }, `読了『${b.title || b.id}』`));
+    if (ul.children.length) res.append(ul);
+    res.append(el('div', { class: 'big-end', style: 'margin-top:12px' }, el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, 'もう 1 年 ▶')));
   } else {
-    res.hidden = false; res.innerHTML = '';
-    res.append(el('div', { class: 'big-end' }, el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, '1 年進める ▶')),
-      el('p', { class: 'hint', style: 'text-align:center;margin-top:8px' }, '外界同期にチェックを入れてから、1 年進める。それだけ。'));
+    res.append(el('h2', {}, el('span', { class: 'step num' }, '3'), '進める'));
+    res.append(el('div', { class: 'big-end' }, el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, '1 年進める ▶')));
   }
+
+  // 残響
+  const council = $('d-council'); council.innerHTML = '';
+  const advs = currentAdvice();
+  const dayIdx = ((dayIndex(today) + state.life.year) % ADVISORS.length + ADVISORS.length) % ADVISORS.length;
+  const show = ui.showAll && stg >= 1 ? ADVISORS : [ADVISORS[dayIdx]];
+  council.append(el('h2', {}, '残響', el('span', { class: 'sub-t' }, '賢人の声')));
+  for (const adv of show) {
+    const line = advs.find(x => x.id === adv.id) || { text: '…' };
+    const row = el('div', { class: 'd-council' }, el('div', { class: 'mono-circle', style: `background:${adv.color}` }, adv.initial),
+      el('div', {}, el('div', { class: 'who' }, el('span', { class: 'nm' }, adv.name), line.focus ? el('span', { class: 'focus' }, line.focus) : null), el('div', { class: 'speech' }, line.text)));
+    const deep = ui.deep[adv.id];
+    if (deep) row.lastChild.append(el('div', { class: `speech ${deep.err ? 'err' : 'deep'}` }, deep.text));
+    if (ui.sample) row.lastChild.append(el('button', { class: 'btn sm ghost', style: 'margin-top:6px', onclick: () => askDeep(adv.id) }, deep?.loading ? '考え中…' : 'Claude に深く聞く'));
+    council.append(row);
+  }
+  if (stg >= 1) council.append(el('button', { class: 'btn sm ghost', style: 'margin-top:8px', onclick: () => { ui.showAll = !ui.showAll; renderDaily(); } }, ui.showAll ? '一人だけにする' : '3 人とも聞く'));
+  $('d-foot').innerHTML = '';
+}
+
+function openMenu() {
+  const stg = stageOf();
+  const body = el('div', { class: 'menu' });
+  const item = (label, sub, fn, cls = '') => body.append(el('button', { class: 'menu-item ' + cls, onclick: () => { closeModal(); fn(); } }, el('span', {}, label), sub ? el('small', {}, sub) : null));
+  item('この世界', '世界観・掟・操作', () => openHelp(false));
+  if (stg >= 1) item('本棚', '読書時間 10 につき 1 冊', openBooks); else item('本棚', '回廊 Lv1 で開く', () => {}, 'locked');
+  if (stg >= 1) item('転生記録', '過去の人生と刻印', openHall); else item('転生記録', '回廊 Lv1 で開く', () => {}, 'locked');
+  if (stg >= 2) item('端末', '街の地図・買い付け・クオンツ', () => setMode('full'), ''); else item('端末', '回廊 Lv2 で開く', () => {}, 'locked');
+  const soundOn = meta.sound !== false;
+  item(soundOn ? '音 ON' : '音 OFF', '効果音', () => { $('btn-sound').click(); });
+  const confirm = el('div', { class: 'menu-item danger' }, el('span', {}, '転生する'), el('small', {}, '今の人生を終えて次へ。胆力 +100'));
+  confirm.addEventListener('click', () => {
+    confirm.innerHTML = '';
+    confirm.append(el('span', {}, '本当に？'), el('button', { class: 'btn danger sm', onclick: (e) => { e.stopPropagation(); closeModal(); game.endLife(state, 'voluntary'); game.saveRun(state); render(); openReborn(); } }, '転生する'), el('button', { class: 'btn sm ghost', onclick: (e) => { e.stopPropagation(); closeModal(); } }, 'やめる'));
+  });
+  body.append(confirm);
+  openModal('メニュー', body, [], { wide: false });
 }
 
 function onRealAction(a) {

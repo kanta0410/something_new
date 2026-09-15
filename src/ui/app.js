@@ -44,7 +44,7 @@ const QUANT_TABS = [
 ];
 
 let meta, state, decisions, lastReport = null;
-const ui = { selected: null, hover: null, tab: 'stats', mc: null, mcKey: '', sample: undefined, blink: true, deep: {}, modal: null, revealed: 0, mode: 'daily', preset: 'guard', quick: false, quickRatio: 0.7, showAll: false, result: null };
+const ui = { selected: null, hover: null, tab: 'stats', mc: null, mcKey: '', sample: undefined, blink: true, deep: {}, modal: null, revealed: 0, mode: 'daily', preset: 'guard', quick: false, quickRatio: 0.7, showAll: false, result: null, busy: false };
 
 const PRESETS = {
   guard: { name: '守る', desc: '読書 30・遊ぶ 30。貯蓄 50%、株 50%。基本形。', time: { reading: 30, scouting: 10, networking: 20, fun: 30, hustle: 10 }, savingsRate: 0.5, stockAlloc: 0.5 },
@@ -73,8 +73,10 @@ function boot() {
   buildStaticControls();
   bindGlobal();
   render();
-  if (!state.life.alive) openReborn();
-  else if (!meta.tutorialDone) openHelp(true);
+  bootSequence(!meta.bootSeen, () => {
+    if (!state.life.alive) openReborn();
+    else if (!meta.tutorialDone) openHelp(true);
+  });
   resolveSample();
   if (!reducedMotion()) setInterval(() => { ui.blink = !ui.blink; drawCityNow(); }, 700);
 }
@@ -134,7 +136,7 @@ function markDirty() { ui.mcKey = ''; if (ui.tab === 'fan') scheduleFan(); }
 function bindGlobal() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && ui.modal) { if (ui.modal.dataset.locked !== '1') closeModal(); return; }
-    if (e.key === 'Enter' && !ui.modal && !['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) endYear();
+    if (e.key === 'Enter' && !ui.modal && !ui.busy && !['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) endYear();
   });
   let t = null;
   window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(renderCharts, 120); });
@@ -142,12 +144,18 @@ function bindGlobal() {
 
 // ───────────────────────── 描画 ─────────────────────────
 function render() {
+  const st = stageOf();
+  if (st < 2 && ui.mode === 'full') ui.mode = 'daily';
   renderHeader();
   renderSoundBtn();
   $('daily').hidden = ui.mode !== 'daily';
   $('full').hidden = ui.mode !== 'full';
-  $('btn-mode').textContent = ui.mode === 'full' ? '毎日モード' : 'フル画面';
+  $('btn-mode').textContent = ui.mode === 'full' ? '毎日' : '端末';
+  $('btn-mode').hidden = st < 2;
+  $('btn-books').hidden = st < 1;
+  $('btn-hall').hidden = st < 1;
   $('btn-city').hidden = ui.mode !== 'full';
+  checkStageUnlock(st);
   $('books-count').textContent = decisions.books.length ? `(${decisions.books.length})` : '';
   if (ui.mode === 'full') {
     renderDecisions();
@@ -174,7 +182,8 @@ function renderSoundBtn() { const b = $('btn-sound'); const on = meta.sound !== 
 
 function renderHeader() {
   const st = game.status(state);
-  $('h-life').textContent = `第${st.life}生`;
+  $('h-life').textContent = `#${st.life}`;
+  $('h-stage').textContent = `Lv${stageOf()}`;
   $('h-age').textContent = `${st.age}歳 / ${st.year}`;
   $('h-nw').textContent = fmt(st.netWorth);
   $('h-nw').className = 'num ' + (st.netWorth < 0 ? 'neg' : 'gold');
@@ -635,7 +644,7 @@ function openReborn() {
   right.append(row);
   body.append(grid, el('div', { class: 'epitaph' }, state.life.epitaph || '—'));
   const newTitles = previewLifeTitles(meta, state, score);
-  if (newTitles.length) body.append(el('div', { class: 'titles' }, el('span', { class: 'eyebrow' }, '新しい称号'), ...newTitles.map(t => el('span', { class: 'title-chip', title: t.desc }, t.name))));
+  if (newTitles.length) body.append(el('div', { class: 'titles' }, el('span', { class: 'eyebrow' }, '新しい刻印'), ...newTitles.map(t => el('span', { class: 'title-chip', title: t.desc }, t.name))));
   // 失敗を自慢する
   const failures = state.brag.failures || [];
   const list = el('ul', { class: 'failures' });
@@ -652,8 +661,8 @@ function openReborn() {
   const worlds = el('div', { class: 'radios', style: 'margin-top:10px' },
     el('label', {}, el('input', { type: 'radio', name: 'world', checked: 'true', onchange: () => { sameWorld = false; } }), '新しい世界（新しい街と市場）'),
     el('label', {}, el('input', { type: 'radio', name: 'world', onchange: () => { sameWorld = true; } }), `同じ世界で選択だけ変える（seed ${state.seed}）`));
-  body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, '転生先'), worlds,
-    el('p', { class: 'hint', style: 'margin-top:8px' }, 'スキル XP は全部持ち越す。次の人生は 22 歳、現金 300 万。同じ世界なら市場の暴落も街の秘密も同じ順番で来る。学びを実行で検証できる。'));
+  if (stageOf() >= 1) body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, '転生先'), worlds);
+  body.append(el('p', { class: 'hint', style: 'margin-top:8px' }, `記憶結晶（スキル XP）は全部持ち越す。次の人生は 22 歳、現金 300 万。${stageOf() >= 1 ? '同じ世界なら市場の暴落も街の秘密も同じ順番で来る。学びを実行で検証できる。' : '回廊 Lv1 で「同じ世界で転生」が開く。'}`));
   const go = el('button', { class: 'btn primary', onclick: () => {
     const r = game.reincarnate(state, meta, { skillForBrag: chosen, sameWorld });
     meta = r.meta; state = r.state; decisions = game.defaultDecisions(state); lastReport = null; ui.selected = null; ui.deep = {}; ui.mcKey = ''; ui.result = null;
@@ -662,7 +671,7 @@ function openReborn() {
     toast('epic', `第${state.life.n}生`, `${r.sameWorld ? '同じ世界に' : ''}転生した。${SKILLS.find(s => s.id === r.bragSkill)?.name} に +${r.bragBonus} XP。スコア ${r.score.total} は殿堂に刻まれた。${r.titles?.length ? `称号: ${r.titles.map(t => t.name).join('・')}` : ''}`);
   } }, '転生する ▶');
   const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(shareText(score, sum), copyBtn) }, '結果をコピー');
-  openModal(`第${state.life.n}生、享年 ${sum.age} 歳`, body, [copyBtn, go], { noClose: true, wide: true });
+  openModal(`転生者 #${state.life.n}、享年 ${sum.age} 歳`, body, [copyBtn, go], { noClose: true, wide: true });
   requestAnimationFrame(() => {
     try {
       drawSparkline($('cv-spark'), state.history.map(h => h.netWorth), { color: '#D9A441', baseline: 0 });
@@ -675,25 +684,25 @@ function openReborn() {
 function openHall() {
   const body = el('div');
   body.append(el('div', { class: 'hall-stats' },
-    el('div', {}, el('span', { class: 'eyebrow' }, '人生'), el('span', { class: 'v num' }, meta.lives)),
+    el('div', {}, el('span', { class: 'eyebrow' }, '転生'), el('span', { class: 'v num' }, meta.lives)),
     el('div', {}, el('span', { class: 'eyebrow' }, '最高スコア'), el('span', { class: 'v num gold' }, meta.bestScore)),
     el('div', {}, el('span', { class: 'eyebrow' }, '自慢ポイント累計'), el('span', { class: 'v num' }, meta.bragPoints)),
     el('div', {}, el('span', { class: 'eyebrow' }, '持ち越しスキル'), el('span', { class: 'v num', style: 'font-size:13px' }, SKILLS.map(s => `${s.name}${level(meta.skills[s.id] || 0)}`).join(' ')))));
   const titles = ensureTitles(meta);
-  body.append(el('div', { class: 'eyebrow', style: 'margin-bottom:4px' }, `称号 ${titles.length}`), el('div', { class: 'titles', style: 'margin-bottom:12px' }, titles.length ? titles.map(t => el('span', { class: 'title-chip', title: `${t.desc}（第${t.life}生）` }, t.name)) : el('span', { class: 'muted', style: 'font-size:12px' }, 'まだ無い。半額で買え。7 日続けろ。')));
+  body.append(el('div', { class: 'eyebrow', style: 'margin-bottom:4px' }, `刻印 ${titles.length}`), el('div', { class: 'titles', style: 'margin-bottom:12px' }, titles.length ? titles.map(t => el('span', { class: 'title-chip', title: `${t.desc}（転生者 #${t.life}）` }, t.name)) : el('span', { class: 'muted', style: 'font-size:12px' }, 'まだ無い。半額で買え。7 日続けろ。')));
   const shareBtn = el('button', { class: 'btn sm gold', onclick: () => copyText(worldUrl(state.seed), shareBtn) }, `今の世界のリンクをコピー（seed ${state.seed}）`);
   body.append(el('div', { style: 'margin-bottom:12px' }, shareBtn, el('span', { class: 'hint', style: 'margin-left:8px' }, '同じ世界を友人に渡して、同じ暴落を別の選択で生きてもらう。')));
   if (!meta.hallOfFame.length) body.append(el('p', { class: 'list-empty' }, 'まだ誰もいない。最初の人生を生き切れ。'));
   else {
     const t = el('table', { class: 'table' });
-    t.append(el('thead', {}, el('tr', {}, ...['生', '享年', 'スコア', '純資産', '死因', '遺言', '世界'].map(h => el('th', {}, h)))));
+    t.append(el('thead', {}, el('tr', {}, ...['転生者', '享年', 'スコア', '純資産', '死因', '遺言', '世界'].map(h => el('th', {}, h)))));
     const tb = el('tbody');
-    for (const h of meta.hallOfFame) tb.append(el('tr', {}, el('td', { class: 'num' }, `第${h.life}生`), el('td', { class: 'num' }, h.age), el('td', { class: 'num gold' }, h.score), el('td', { class: 'num' }, fmt(h.netWorth)), el('td', {}, ({ natural: '天寿', illness: '病', bankrupt: '破産', voluntary: '自主' })[h.cause] || ''), el('td', { class: 'ep' }, h.epitaph),
+    for (const h of meta.hallOfFame) tb.append(el('tr', {}, el('td', { class: 'num' }, `#${h.life}`), el('td', { class: 'num' }, h.age), el('td', { class: 'num gold' }, h.score), el('td', { class: 'num' }, fmt(h.netWorth)), el('td', {}, ({ natural: '天寿', illness: '病', bankrupt: '破産', voluntary: '自主' })[h.cause] || ''), el('td', { class: 'ep' }, h.epitaph),
       el('td', {}, el('button', { class: 'btn sm ghost', title: `seed ${h.seed}`, onclick: () => replayWorld(h.seed) }, 'もう一度'))));
     t.append(tb);
     body.append(el('div', { class: 'table-wrap' }, t));
   }
-  openModal('殿堂', body, [], { wide: true });
+  openModal('転生記録', body, [], { wide: true });
 }
 
 /** 殿堂の世界をもう一度: 生きていれば自主転生扱い（胆力 +100）で、その seed の世界に生まれ直す */
@@ -719,39 +728,92 @@ function worldUrl(seed) { const u = new URL(location.href); u.search = `?seed=${
 
 // ───────────────────────── 遊び方 ─────────────────────────
 function openHelp(first) {
+  const stg = stageOf();
   const slides = [
-    el('div', { class: 'slide' }, el('h3', {}, '人生はゲーム。死は終わりではない。'), el('ul', {},
-      el('li', {}, '毎日開く。「今日のクエスト」を読み、現実でやった行動をタップする。押した瞬間にゲームへ反映され、連続日数が伸びる。'),
-      el('li', {}, '1 ターン = 1 年。22 歳、現金 300 万から始まる。方針を 4 択で選んで「今年を終える」。細かく触るなら「フル画面」。'),
-      el('li', {}, '死ぬか、破産するか、自分で転生を選ぶまで続く。スキル XP は次の人生に全部持ち越す。'),
-      el('li', {}, '失敗は自慢ポイントになり、転生時に XP へ変わる。却下された買い付けも、損失も、破産も。'),
-      el('li', {}, '暴落の年は「アラモの時」。エネルギー +40、売主は投げ売りを始める。最悪の時が最高の時。'),
-      el('li', {}, 'スコア = 富 + 楽 + 学 + 縁 + 自慢。金だけでは勝てない。'))),
-    el('div', { class: 'slide' }, el('h3', {}, '価値観がそのままルール'), el('div', { class: 'table-wrap' }, el('table', { class: 'table' },
+    el('div', { class: 'slide about' },
+      el('h3', {}, 'ここは人生演算装置〈回廊〉'),
+      el('p', {}, 'あなたは', el('span', { class: 'k' }, '転生者'), '。世界 #', el('span', { class: 'k num' }, String(state.seed)), ' で 22 歳から生きる。1 年は 1 タップ。死ねば', el('span', { class: 'k' }, '記憶結晶'), '（スキル）を持って次の世界へ。'),
+      el('p', {}, el('span', { class: 'k' }, '外界'), '（現実）であなたが動くと、回廊の中のあなたが強くなる。買い付けを 1 本出せば胆力が育ち、自転車で街を見れば地域知が育つ。嘘をついても損をするのは自分だけ。'),
+      el('p', {}, '三つの', el('span', { class: 'k' }, '残響'), '——バフェット、ソロス、ヒンメル——が毎年語りかける。市場は本物のモデルで動き、バブルと暴落を勝手に起こす。暴落の年は「アラモの時」。最悪の時が最高の時。'),
+      el('p', {}, '目的はひとつ。外界でも回廊でも、恐怖を捨てた分だけ大胆に賭け、その分を楽しむこと。')),
+    el('div', { class: 'slide' }, el('h3', {}, '掟'), el('div', { class: 'table-wrap' }, el('table', { class: 'table' },
       el('tbody', {}, ...[
+        ['死は終わりではない', '死亡・破産・自主転生でスキルを持ち越す。自ら転生を選べば胆力 +100'],
+        ['アラモを忘れるな', '暴落年はエネルギー +40。売主は投げ売りを始める'],
+        ['失敗は自慢する', '却下された買い付け、損失、破産は自慢ポイント → 転生時に XP'],
         ['とにかく買い付けを出す', '売主の本音は人それぞれ。15% は急いで手放したい。半額でも通ることがある'],
-        ['現地を見る', '偵察で推定誤差が縮み、配達員や工事のおっちゃんが秘密を教えてくれる'],
         ['資産と負債を区別する', '物件はキャッシュフローの符号で「資産」「負債」。負債はバフェットが叱る'],
-        ['給料は貯めない', '貯蓄率 = 余剰のうち投資に回す割合。残りは楽しさに変わる。現金は年 0.5% しか増えない'],
-        ['無知に気づいたら自己教育', 'クオンツ Lv で統計、Kelly、モンテカルロ扇形図、市場の生態系が見えるようになる'],
-        ['ロールモデル思考', '賢人会議が毎年助言する。Artifact 上では Claude が同じ人格で深く答える'],
-      ].map(([a, b]) => el('tr', {}, el('td', {}, a), el('td', { class: 'muted' }, b))))))),
-    el('div', { class: 'slide' }, el('h3', {}, '操作'), el('ul', {},
-      el('li', {}, el('kbd', {}, 'Enter'), ' で年送り、', el('kbd', {}, 'Esc'), ' でモーダルを閉じる。'),
-      el('li', {}, '「攻める」を選ぶと安い売り物 3 本に 70%（届かなければ半額）で自動で買い付けが出る。フル画面では街の地区をクリック → 偵察先に追加 → 売り物に「買い付け」→ 提示額と LTV を自分で決められる。'),
-      el('li', {}, '「実績」に現実の行動の台帳。数字が出ていない価値観は、まだ行動になっていない。'),
-      el('li', {}, '本棚は読書時間 10 につき 1 冊。同じ年に買い付けか株の買い増しをすると XP 2 倍。'),
-      el('li', {}, '不労所得が生活費を超えたら FIRE。会社を辞めて時間が増える。'),
-      el('li', {}, '保存は自動（この端末のブラウザ）。「転生する」で恐怖を捨てた者は胆力 +100。'))),
+        ['無知に気づいたら自己教育', 'クオンツ Lv で統計、Kelly、モンテカルロ、市場の生態系が見えるようになる'],
+      ].map(([x, y]) => el('tr', {}, el('td', {}, x), el('td', { class: 'muted' }, y))))))),
+    el('div', { class: 'slide' }, el('h3', {}, '操作と回廊レベル'), el('ul', {},
+      el('li', {}, '毎日：クエストを読む → 外界同期をタップ → 航路を選ぶ → 「1 年進める」。', el('kbd', {}, 'Enter'), ' でも進む。'),
+      el('li', {}, '回廊 Lv0：守る／攻める。「攻める」は安い売り物 3 本に 70%（届かなければ半額）で自動で買い付けを出す。'),
+      el('li', {}, '回廊 Lv1（転生 1 回 or 同期 7 日）：学ぶ／遊ぶ、本棚、転生記録、同じ世界で転生。'),
+      el('li', {}, '回廊 Lv2（転生 2 回 or 同期 30 日）：端末＝街の地図で地区を偵察し、提示額と LTV を自分で決める。クオンツ画面。'),
+      el('li', {}, '「外界ログ」に現実の行動の台帳。数字が出ていない価値観は、まだ行動になっていない。'),
+      el('li', {}, '保存はこの端末のブラウザ。ホーム画面に追加するとアプリになる。')),
+      el('div', { style: 'margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap' },
+        el('span', { class: 'stage-chip' }, `いま 回廊 Lv${stg}`),
+        stg < 2 ? el('button', { class: 'btn sm gold', onclick: () => { meta.unlockAll = true; game.saveMeta(meta); closeModal(); render(); toast('epic', '回廊 全解放', '端末、クオンツ、同じ世界で転生。全部開いた。'); } }, '先に全部開く') : el('span', { class: 'muted', style: 'font-size:12px' }, '全部開いている'))),
   ];
   let i = 0;
   const body = el('div'); const dots = el('div', { class: 'dots' });
-  const show = () => { body.innerHTML = ''; body.append(slides[i]); dots.innerHTML = ''; slides.forEach((_, j) => dots.append(el('i', { class: j === i ? 'on' : '' }))); prev.disabled = i === 0; next.textContent = i === slides.length - 1 ? (first ? '始める ▶' : '閉じる') : '次へ'; };
+  const show = () => { body.innerHTML = ''; body.append(slides[i]); dots.innerHTML = ''; slides.forEach((_, j) => dots.append(el('i', { class: j === i ? 'on' : '' }))); prev.disabled = i === 0; next.textContent = i === slides.length - 1 ? (first ? '接続完了 ▶' : '閉じる') : '次へ'; };
   const prev = el('button', { class: 'btn', onclick: () => { i = Math.max(0, i - 1); show(); } }, '前へ');
   const next = el('button', { class: 'btn primary', onclick: () => { if (i < slides.length - 1) { i++; show(); } else { closeModal(); if (!meta.tutorialDone) { meta.tutorialDone = true; game.saveMeta(meta); } } } }, '次へ');
   show();
-  openModal('遊び方', body, [prev, next], { foot: dots, wide: true });
+  openModal('この世界について', body, [prev, next], { foot: dots, wide: true });
   if (first && !meta.tutorialDone) { meta.tutorialDone = true; game.saveMeta(meta); }
+}
+
+// ───────────────────────── 回廊レベルと起動 ─────────────────────────
+/** 段階解放。Lv0: 基本 / Lv1: 転生 1 回 or 同期 7 日 / Lv2: 転生 2 回 or 同期 30 日。全解放フラグあり。 */
+function stageOf() {
+  if (meta.unlockAll) return 2;
+  const days = Object.keys(ensureDaily(meta).days).length;
+  const lives = meta.lives || 0;
+  if (lives >= 2 || days >= 30) return 2;
+  if (lives >= 1 || days >= 7) return 1;
+  return 0;
+}
+
+function checkStageUnlock(st) {
+  const seen = meta.stageSeen;
+  if (seen === undefined) { meta.stageSeen = st; game.saveMeta(meta); return; }
+  if (st > seen) {
+    meta.stageSeen = st; game.saveMeta(meta); play('streak');
+    toast('epic', `回廊 Lv${st} に拡張`, st === 1 ? '学ぶ／遊ぶ、本棚、転生記録、同じ世界で転生が開いた。' : '端末（街の地図・クオンツ）が開いた。');
+  }
+}
+
+function bootSequence(first, done) {
+  const box = $('boot'), log = $('boot-log'), go = $('boot-go');
+  if (!box || !log) return done();
+  const skillsLine = SKILLS.map(s => `${s.name}${level(state.skills[s.id]?.xp || 0)}`).join(' ');
+  const lines = first ? [
+    ['dim', '回廊 v2 — 人生演算装置 起動'],
+    ['', `> 世界 #${state.seed} を生成 … 36 地区 / 市場 / 金利`],
+    ['', `> 転生者 #${state.life.n} を接続 … 記憶結晶: ${meta.lives ? skillsLine : 'なし'}`],
+    ['', '> 残響を呼び出し … バフェット / ソロス / ヒンメル'],
+    ['hot', '> 外界リンク … 待機中。あなたの行動を待っている'],
+  ] : [['dim', `回廊 再接続 … 転生者 #${state.life.n} / 世界 #${state.seed} / 同期 ${currentStreak(meta)} 日`]];
+  box.hidden = false; log.innerHTML = ''; go.hidden = true;
+  ui.busy = true;
+  const fast = reducedMotion();
+  let i = 0, finished = false;
+  const finish = () => { if (finished) return; finished = true; box.hidden = true; ui.busy = false; if (first) { meta.bootSeen = true; game.saveMeta(meta); } done(); };
+  const step = () => {
+    if (i < lines.length) {
+      const [cls, txt] = lines[i++];
+      log.querySelectorAll('.cursor').forEach(x => x.classList.remove('cursor'));
+      log.append(el('div', { class: `${cls} cursor` }, txt));
+      setTimeout(step, fast ? 0 : 320);
+    } else if (first) { go.hidden = false; go.onclick = finish; go.focus(); }
+    else setTimeout(finish, fast ? 0 : 600);
+  };
+  const onKey = (e) => { if (e.key === 'Enter' && !box.hidden && !go.hidden) { document.removeEventListener('keydown', onKey); finish(); } };
+  document.addEventListener('keydown', onKey);
+  step();
 }
 
 // ───────────────────────── 毎日モード ─────────────────────────
@@ -796,12 +858,14 @@ function renderDaily() {
   const st = game.status(state);
   // 上段
   const top = $('d-top'); top.innerHTML = '';
-  top.append(el('span', { class: 'streak num' }, `${streak} 日`, el('small', {}, `連続で現実に動いた日${ensureDaily(meta).bestStreak > streak ? `（最長 ${ensureDaily(meta).bestStreak}）` : ''}`)),
-    el('span', { class: 'num' }, `第${st.life}生 · ${st.age}歳 · ${fmt(st.netWorth)}`),
+  const stg = stageOf();
+  top.append(el('span', { class: 'streak num' }, `同期 ${streak} 日`, el('small', {}, `外界で連続して動いた日${ensureDaily(meta).bestStreak > streak ? `（最長 ${ensureDaily(meta).bestStreak}）` : ''}`)),
+    el('span', { class: 'num' }, `転生者 #${st.life} · 世界 #${state.seed} · ${st.age}歳 · ${fmt(st.netWorth)}`),
+    el('span', { class: 'stage-chip' }, `回廊 Lv${stg}`),
     el('span', { class: 'today num' }, today));
   // 今日の現実
   const real = $('d-real'); real.innerHTML = '';
-  real.append(el('h2', {}, '今日の現実', el('span', { class: 'cnt num' }, `${done.length} / ${REAL_ACTIONS.length}`), el('span', { class: 'eyebrow' }, 'Real world')));
+  real.append(el('h2', {}, '外界同期', el('span', { class: 'sub-t' }, '今日、現実でやったこと'), el('span', { class: 'cnt num' }, `${done.length} / ${REAL_ACTIONS.length}`), el('span', { class: 'eyebrow' }, 'Outer sync')));
   const quest = questFor(today);
   real.append(el('div', { class: 'quest' + (done.includes(quest.action) ? ' done' : '') }, el('span', { class: 'eyebrow' }, '今日のクエスト'), el('span', { class: 'qt' }, quest.text)));
   for (const a of REAL_ACTIONS) {
@@ -814,13 +878,16 @@ function renderDaily() {
   note.addEventListener('change', saveNote); note.addEventListener('keydown', (e) => { if (e.key === 'Enter') { saveNote(); note.blur(); } });
   if (getNote(meta, today)) note.classList.add('saved');
   real.append(note);
-  real.append(el('p', { class: 'hint', style: 'margin-top:8px' }, done.length === REAL_ACTIONS.length ? 'フルコンボ。エネルギー +20。今日は勝ちだ。' : '押した瞬間にゲームへ反映される。1 日 1 回ずつ。6 つ全部でエネルギー +20。嘘をつくと自分が損をするだけ。'));
+  real.append(el('p', { class: 'hint', style: 'margin-top:8px' }, done.length === REAL_ACTIONS.length ? 'フルコンボ。エネルギー +20。今日は勝ちだ。' : '押した瞬間に回廊の中のあなたへ反映される。1 日 1 回ずつ。6 つ全部でエネルギー +20。嘘をつくと損をするのは自分。'));
   // 今年の方針
   const plan = $('d-plan'); plan.innerHTML = '';
-  plan.append(el('h2', {}, '今年の方針', el('span', { class: 'cnt num' }, `${state.life.year}年`), el('span', { class: 'eyebrow' }, 'Plan')));
+  plan.append(el('h2', {}, '今年の航路', el('span', { class: 'sub-t' }, '時間と金の配分'), el('span', { class: 'cnt num' }, `${state.life.year}年`), el('span', { class: 'eyebrow' }, 'Course')));
   const grid = el('div', { class: 'presets' });
-  for (const [id, p] of Object.entries(PRESETS)) grid.append(el('button', { class: 'preset' + (ui.preset === id ? ' on' : ''), onclick: () => applyPreset(id) }, el('b', {}, p.name), el('span', {}, p.desc)));
+  const visible = Object.entries(PRESETS).filter(([id]) => stg >= 1 || id === 'guard' || id === 'attack');
+  if (stg < 1 && !['guard', 'attack'].includes(ui.preset) && ui.preset !== 'custom') applyPreset('guard', true);
+  for (const [id, p] of visible) grid.append(el('button', { class: 'preset' + (ui.preset === id ? ' on' : ''), onclick: () => applyPreset(id) }, el('b', {}, p.name), el('span', {}, p.desc)));
   plan.append(grid);
+  if (stg < 1) plan.append(el('div', { class: 'lock-note' }, el('b', {}, '回廊 Lv1'), '学ぶ／遊ぶ、本棚、転生記録が開く。転生 1 回、または外界同期 7 日。'));
   const counts = { 0.7: quickOffersFor(0.7).length, 0.5: quickOffersFor(0.5).length };
   if (ui.quick && counts[ui.quickRatio] === 0 && counts[0.5] > 0 && ui.quickRatio !== 0.5) ui.quickRatio = 0.5; // 70% で届かなければ半額で出す
   const seg = el('span', { class: 'seg' }, ...[0.7, 0.5].map(r => el('button', { 'aria-pressed': ui.quickRatio === r ? 'true' : 'false', onclick: () => { ui.quickRatio = r; renderDaily(); } }, `${Math.round(r * 100)}%（${counts[r]}）`)));
@@ -829,7 +896,7 @@ function renderDaily() {
     el('button', { class: 'btn sm ' + (ui.quick ? 'on' : ''), onclick: () => { ui.quick = !ui.quick; if (ui.preset !== 'custom' && !!PRESETS[ui.preset]?.quick !== ui.quick) customized(); renderDaily(); } }, ui.quick ? `安い売り物 ${qo.length} 本に買い付けを出す` : '安い売り物 3 本に買い付けを出す'),
     seg,
     el('span', { class: 'hint' }, ui.quick ? (qo.length ? `${Math.round(ui.quickRatio * 100)}% で届く売り物が ${qo.length} 件。半額でも常識外でもいい。却下されても学びと自慢になる。` : '今の現金では半額でも届かない。数年貯めるか、フル画面で株を取り崩す。') : '「行動すると事態が動く」を 1 タップで。'),
-    el('button', { class: 'btn sm ghost', onclick: () => setMode('full') }, '詳細（フル画面）')));
+    stg >= 2 ? el('button', { class: 'btn sm ghost', onclick: () => setMode('full') }, '端末で細かく') : el('span', { class: 'hint' }, '回廊 Lv2 で端末（街の地図・クオンツ）が開く')));
   const t = decisions.time;
   plan.append(el('p', { class: 'hint', style: 'margin-top:8px' }, `時間: 読書 ${Math.round(t.reading)} · 偵察 ${Math.round(t.scouting)} · 人脈 ${Math.round(t.networking)} · 遊ぶ ${Math.round(t.fun)} · 副業 ${Math.round(t.hustle)} ／ 貯蓄率 ${Math.round(decisions.savingsRate * 100)}% ／ 株式 ${Math.round(decisions.stockAlloc * 100)}%${decisions.books.length ? ` ／ 本 ${decisions.books.length} 冊` : ''}${ui.preset === 'custom' ? ' ／ 手動調整あり' : ''}`));
   // 賢人
@@ -837,7 +904,7 @@ function renderDaily() {
   const advs = currentAdvice();
   const dayIdx = ((dayIndex(today) + state.life.year) % ADVISORS.length + ADVISORS.length) % ADVISORS.length;
   const show = ui.showAll ? ADVISORS : [ADVISORS[dayIdx]];
-  council.append(el('h2', {}, ui.showAll ? '賢人会議' : '今日の賢人', el('span', { class: 'eyebrow' }, 'Council')));
+  council.append(el('h2', {}, ui.showAll ? '残響（3 人）' : '残響', el('span', { class: 'sub-t' }, '賢人たちの声'), el('span', { class: 'eyebrow' }, 'Echoes')));
   for (const a of show) {
     const adv = advs.find(x => x.id === a.id) || { text: '…' };
     const row = el('div', { class: 'd-council' }, el('div', { class: 'mono-circle', style: `background:${a.color}` }, a.initial),
@@ -850,9 +917,9 @@ function renderDaily() {
   council.append(el('button', { class: 'btn sm ghost', style: 'margin-top:8px', onclick: () => { ui.showAll = !ui.showAll; renderDaily(); } }, ui.showAll ? '一人だけにする' : '3 人とも聞く'));
   // 下部の副操作（モバイルではバーから隠れる分）
   const foot = $('d-foot'); foot.innerHTML = '';
-  foot.append(el('button', { class: 'btn sm', onclick: openBooks }, `本棚${decisions.books.length ? ` (${decisions.books.length})` : ''}`),
-    el('button', { class: 'btn sm', onclick: openHall }, '殿堂'),
-    el('button', { class: 'btn sm', onclick: () => openHelp(false) }, '遊び方'),
+  if (stg >= 1) foot.append(el('button', { class: 'btn sm', onclick: openBooks }, `本棚${decisions.books.length ? ` (${decisions.books.length})` : ''}`),
+    el('button', { class: 'btn sm', onclick: openHall }, '転生記録'));
+  foot.append(el('button', { class: 'btn sm', onclick: () => openHelp(false) }, 'この世界'),
     el('button', { class: 'btn sm ghost', onclick: () => $('btn-sound').click() }, meta.sound === false ? '音 OFF' : '音 ON'),
     el('button', { class: 'btn sm danger', onclick: () => { confirmReborn(); $('reborn-wrap').scrollIntoView({ block: 'nearest' }); } }, '転生する'));
   // 結果
@@ -861,7 +928,7 @@ function renderDaily() {
     const { report, nwBefore, nwAfter, year } = ui.result;
     const delta = nwAfter - nwBefore;
     res.hidden = false; res.innerHTML = '';
-    res.append(el('h2', {}, `${year}年の結果`, el('span', { class: 'eyebrow' }, 'Result')));
+    res.append(el('h2', {}, `${year}年 演算結果`, el('span', { class: 'eyebrow' }, 'Result')));
     res.append(el('div', { class: `delta num ${delta >= 0 ? 'pos' : 'neg'}` }, `${delta >= 0 ? '+' : ''}${fmt(delta)}`, el('small', {}, `純資産 ${fmt(nwBefore)} → ${fmt(nwAfter)}`)));
     const ul = el('ul');
     const yr = report.yearResult;
@@ -873,11 +940,11 @@ function renderDaily() {
     res.append(ul);
     res.append(el('div', { style: 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap' },
       el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, 'もう 1 年 ▶'),
-      el('button', { class: 'btn ghost', onclick: () => setMode('full') }, 'フル画面で見る')));
+      stg >= 2 ? el('button', { class: 'btn ghost', onclick: () => setMode('full') }, '端末で見る') : null));
   } else {
     res.hidden = false; res.innerHTML = '';
-    res.append(el('div', { class: 'big-end' }, el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, '今年を終える ▶')),
-      el('p', { class: 'hint', style: 'text-align:center;margin-top:8px' }, '今日の現実にチェックを入れてから、1 年進める。それだけ。'));
+    res.append(el('div', { class: 'big-end' }, el('button', { class: 'btn primary', onclick: endYear, disabled: state.life.alive ? null : 'true' }, '1 年進める ▶')),
+      el('p', { class: 'hint', style: 'text-align:center;margin-top:8px' }, '外界同期にチェックを入れてから、1 年進める。それだけ。'));
   }
 }
 
@@ -923,7 +990,7 @@ function openLedger() {
   if (notes.length) { body.append(el('div', { class: 'eyebrow', style: 'margin-top:12px' }, '言語化メモ（直近 14 日）')); const nl = el('ul', { class: 'notes' }); for (const n of notes) nl.append(el('li', {}, el('span', { class: 'num muted' }, n.date), ' ', n.text)); body.append(nl); }
   body.append(el('p', { class: 'hint', style: 'margin-top:10px' }, 'これが実社会での検証記録。買い付けの本数、現地を見た回数、与えた回数。数字が出ていない価値観は、まだ行動になっていない。'));
   const copyBtn = el('button', { class: 'btn gold', onclick: () => copyText(ledgerText(meta, today), copyBtn) }, '台帳をコピー');
-  openModal('実績台帳', body, [copyBtn], { wide: true });
+  openModal('外界ログ', body, [copyBtn], { wide: true });
 }
 
 function shareText(score, sum) {

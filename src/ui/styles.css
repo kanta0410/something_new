@@ -466,7 +466,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
   .hdr { padding: 8px 10px; gap: 6px 14px; }
   .logo { font-size: 18px; }
   .hdr-stats dd { font-size: 14px; }
-  .hdr-seed, .hdr-stats > div:last-child { display: none; }
+  .hdr-stats > div:nth-child(6) { display: none; }
   .bar-actions { padding: 0 8px; gap: 6px; }
   .bar-actions .btn.primary { min-height: 40px; padding: 0 14px; font-size: 15px; }
   .presets { grid-template-columns: 1fr 1fr; }
@@ -503,3 +503,50 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .note.saved { border-color: var(--positive); }
 .notes { font-size: 12px; font-family: var(--font-serif); line-height: 1.6; margin-top: 4px; }
 .notes li { padding: 3px 0; border-top: 1px dashed var(--rule); }
+
+/* ── v2 回廊: SF レイヤー ── */
+body { background-image: repeating-linear-gradient(0deg, rgba(241, 233, 210, 0.035) 0 1px, transparent 1px 3px), radial-gradient(ellipse at 50% -20%, rgba(111, 191, 163, 0.10), transparent 55%), radial-gradient(ellipse at 100% 100%, rgba(228, 72, 44, 0.07), transparent 50%); }
+.hdr { position: relative; }
+.hdr::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--gold) 40%, transparent 80%); }
+.daily { font-size: 15px; }
+.d-card h2 { font-size: 17px; }
+.d-card h2 .sub-t { font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+.real-row { font-size: 15px; min-height: 54px; }
+.real-row .eff { font-size: 12px; }
+.quest .qt { font-size: 15px; }
+.preset b { font-size: 17px; }
+.preset span { font-size: 12px; }
+.d-council .speech { font-size: 16px; }
+.d-top { padding: 10px 2px 2px; }
+.d-top .streak { font-size: 30px; }
+.hint { font-size: 12px; }
+.stage-chip { display: inline-block; border: 1px solid var(--positive); color: var(--positive); font-size: 11px; padding: 0 8px; letter-spacing: 0.1em; }
+.lock-note { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px dashed var(--rule); color: var(--muted); font-size: 12px; margin-top: 8px; }
+.lock-note b { font-weight: 400; color: var(--gold); }
+/* 起動シーケンス */
+.boot { position: fixed; inset: 0; z-index: 90; background: var(--ground); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.boot-box { width: min(560px, 100%); border: 1px solid var(--rule); padding: 18px 20px 20px; background: var(--surface); box-shadow: 0 0 0 4px var(--ground), 0 0 40px rgba(111, 191, 163, 0.12); position: relative; }
+.boot-box::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--gold) 50%, var(--positive)); }
+.boot-title { font-size: 26px; letter-spacing: 0.2em; color: var(--text); margin-bottom: 10px; }
+.boot-title span { font-family: var(--font-num); font-size: 11px; letter-spacing: 0.3em; color: var(--muted); margin-left: 10px; }
+.boot-log { font-family: var(--font-num); font-size: 13px; line-height: 1.8; color: var(--positive); white-space: pre-wrap; margin: 0 0 14px; min-height: 120px; }
+.boot-log .dim { color: var(--muted); }
+.boot-log .hot { color: var(--gold); }
+.boot-log .cursor::after { content: "▌"; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+#boot-go { min-height: 44px; padding: 0 28px; font-size: 16px; letter-spacing: 0.12em; }
+.about { font-family: var(--font-serif); font-size: 15px; line-height: 1.9; }
+.about p + p { margin-top: 10px; }
+.about .k { color: var(--gold); }
+@media (max-width: 640px) {
+  .daily { font-size: 15px; }
+  .boot-title { font-size: 22px; }
+  .hdr-stats > div:nth-child(4) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .boot-log .cursor::after { animation: none; } }
+
+@media (max-width: 640px) {
+  .d-card h2 { white-space: nowrap; }
+  .d-card h2 .sub-t, .d-card h2 .eyebrow { display: none; }
+  .hdr-stats > div:nth-child(7) dd { font-size: 12px; }
+}

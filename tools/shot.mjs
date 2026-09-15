@@ -9,14 +9,16 @@ const candidates = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', '/opt/
 const executablePath = candidates.find(p => existsSync(p));
 const outDir = path.join(root, 'shots'); mkdirSync(outDir, { recursive: true });
 const errors = [];
+const INIT = () => { try { const m = JSON.parse(localStorage.getItem('isekai-quant:meta') || '{}'); m.unlockAll = true; m.bootSeen = true; localStorage.setItem('isekai-quant:meta', JSON.stringify(m)); } catch (_) {} };
 const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-gpu'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 }, deviceScaleFactor: 1 });
   page.on('pageerror', (e) => { errors.push(e.message); console.error('[pageerror]', e.message); });
   page.on('console', (m) => { if (m.type() === 'error' && !/ERR_CONNECTION|Failed to load resource/.test(m.text())) { errors.push(m.text()); console.error('[console]', m.text()); } });
-  await page.goto(pathToFileURL(path.join(root, 'dist', 'index.html')).href, { waitUntil: 'load' });
+  await page.addInitScript(INIT); await page.goto(pathToFileURL(path.join(root, 'dist', 'index.html')).href, { waitUntil: 'load' });
   await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(outDir, 'app-tutorial.png') });
+  if (await page.locator('#boot-go').count() && await page.locator('#boot-go').isVisible()) { await page.click('#boot-go'); await page.waitForTimeout(200); }
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
   await page.click('#btn-mode'); await page.waitForTimeout(400);

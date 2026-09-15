@@ -7,13 +7,15 @@ const root = path.resolve(new URL('.', import.meta.url).pathname, '..');
 const executablePath = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', '/opt/pw-browsers/chromium/chrome'].find(p => existsSync(p));
 mkdirSync(path.join(root, 'shots'), { recursive: true });
 const errors = [];
+const INIT = () => { try { const m = JSON.parse(localStorage.getItem('isekai-quant:meta') || '{}'); m.unlockAll = true; m.bootSeen = true; localStorage.setItem('isekai-quant:meta', JSON.stringify(m)); } catch (_) {} };
 const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-gpu'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   page.on('pageerror', (e) => { errors.push(e.message); console.error('[pageerror]', e.message); });
   page.on('console', (m) => { if (m.type() === 'error' && !/ERR_CONNECTION|Failed to load resource/.test(m.text())) { errors.push(m.text()); console.error('[console]', m.text()); } });
-  await page.goto(pathToFileURL(path.join(root, 'dist', 'index.html')).href, { waitUntil: 'load' });
+  await page.addInitScript(INIT); await page.goto(pathToFileURL(path.join(root, 'dist', 'index.html')).href, { waitUntil: 'load' });
   await page.waitForTimeout(1000);
+  if (await page.locator('#boot-go').count() && await page.locator('#boot-go').isVisible()) { await page.click('#boot-go'); await page.waitForTimeout(200); }
   await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   // 現実の行動を全部
   const rows = page.locator('.real-row'); const n = await rows.count();

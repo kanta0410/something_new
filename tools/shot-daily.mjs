@@ -13,6 +13,7 @@ async function drive(page, tag) {
   page.on('pageerror', (e) => { errors.push(e.message); console.error('[pageerror]', e.message); });
   page.on('console', (m) => { if (m.type() === 'error' && !/ERR_CONNECTION|Failed to load resource/.test(m.text())) { errors.push(m.text()); console.error('[console]', m.text()); } });
   await page.goto(url, { waitUntil: 'load' }); await page.waitForTimeout(1200);
+  await page.waitForSelector('#boot-go', { state: 'visible', timeout: 6000 }).then(async () => { await page.screenshot({ path: path.join(outDir, `daily-${tag}-boot.png`) }); await page.click('#boot-go'); }).catch(() => {}); await page.waitForTimeout(300);
   await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(outDir, `daily-${tag}-1.png`), fullPage: tag === 'mobile' });
   const rows = page.locator('.real-row');
